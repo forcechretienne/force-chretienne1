@@ -25,15 +25,13 @@ function openShop() { if (!isMember()) { openSheet("join", { what: "La vente sur
 
 function Slider({ slides, sponso }) {
   const [i, setI] = useState(0);
-  const paused = useRef(false);
+  // Défilement automatique toutes les 3 secondes (le minuteur repart à chaque changement de diapositive)
   useEffect(() => {
-    let reduce = false; try { reduce = matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
-    if (reduce) return;
-    const t = setInterval(() => { if (!paused.current) setI(x => (x + 1) % slides.length); }, 5000);
-    return () => clearInterval(t);
-  }, []);
+    const t = setTimeout(() => setI(x => (x + 1) % slides.length), 3000);
+    return () => clearTimeout(t);
+  }, [i]);
   const dark = slides[i].fg !== "#fff";
-  return html`<div class="slider" onMouseEnter=${() => paused.current = true} onMouseLeave=${() => paused.current = false} onTouchStart=${() => paused.current = true}>
+  return html`<div class="slider">
     <div class="track" style=${"transform:translateX(-" + i * 100 + "%)"}>
       ${slides.map((x, k) => html`<div key=${k} class="slide" style=${"background:" + x.bg + ";color:" + x.fg} aria-hidden=${k !== i}>
         <span class="deco1" style=${"background:" + x.d1}></span><span class="deco2" style=${"border:2px solid " + x.d2}></span>
@@ -43,7 +41,7 @@ function Slider({ slides, sponso }) {
       </div>`)}
     </div>
     ${sponso && html`<span class="sponso">SPONSORISÉ</span>`}
-    <div class="dots">${slides.map((x, k) => html`<button key=${k} aria-label=${"Diapositive " + (k + 1)} class=${k === i ? "on" : ""} style=${"background:" + (dark ? (k === i ? "#0B1B3F" : "rgba(11,27,63,.3)") : (k === i ? "#fff" : "rgba(255,255,255,.5)"))} onClick=${() => { paused.current = true; setI(k); }}></button>`)}</div>
+    <div class="dots">${slides.map((x, k) => html`<button key=${k} aria-label=${"Diapositive " + (k + 1)} class=${k === i ? "on" : ""} style=${"background:" + (dark ? (k === i ? "#0B1B3F" : "rgba(11,27,63,.3)") : (k === i ? "#fff" : "rgba(255,255,255,.5)"))} onClick=${() => setI(k)}></button>`)}</div>
   </div>`;
 }
 
