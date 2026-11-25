@@ -532,5 +532,15 @@ do $$ begin
   begin alter publication supabase_realtime add table public.notifications; exception when others then null; end;
 end $$;
 
+-- ---------------------------------------------------------------------
+-- 12. Droits d'accès de l'API (la sécurité ligne par ligne reste appliquée)
+-- ---------------------------------------------------------------------
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant select on public.products, public.shops to anon;
+grant execute on all functions in schema public to anon, authenticated;
+revoke execute on function public.notify(uuid, text, text, text) from public, anon, authenticated;
+alter default privileges in schema public grant select, insert, update, delete on tables to authenticated;
+
 -- Fin. Vérification : la requête suivante doit afficher les deux e-mails administrateurs.
 select email as administrateurs from public.admin_emails;
