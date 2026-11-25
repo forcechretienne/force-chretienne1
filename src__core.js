@@ -4,6 +4,9 @@ const { useState, useEffect, useRef } = preactHooks;
 const html = htm.bind(h);
 const sb = supabase.createClient(window.FC_CONFIG.supabaseUrl, window.FC_CONFIG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
+/* Photos libres de droits (Unsplash, licence gratuite) pour les bannières et univers de Joyau */
+const UNSPLASH = { attieke: "photo-1665332195309-9d75071138f0", robe: "photo-1709809081557-78f803ce93a0", sac: "photo-1605733513597-a8f8341084e6", collier: "photo-1783541507490-edb026e2a961", telephone: "photo-1511707171634-5f897ff02aa9", blender: "photo-1622818426197-d54f85b88690", parfum: "photo-1587017539504-67cfbddac569", immo: "photo-1580587771525-78b9dba3b914", hotel: "photo-1611892440504-42a792e24d32", menuiserie: "photo-1561297331-a9c00b9c2c44", outils: "photo-1581783898377-1c85bf937427", voiture: "photo-1550355291-bbee04a92027", ordinateur: "photo-1541807084-5c52b6b3adef" };
+for (const k in UNSPLASH) IMG[k] = "https://images.unsplash.com/" + UNSPLASH[k] + "?w=640&q=70&auto=format&fit=crop";
 const CATS = ["Tout", "Immobilier", "Services", "Gastronomie", "Mode", "Téléphones", "Bijoux & Montres", "Beauté", "Électroménager", "Maison", "Informatique", "Auto & Moto", "Bébé"];
 const PROFILE_COLS = "id,nom,prenoms,profession,entreprise,photo_url,eglise,assemblee,ville,status,role";
 
