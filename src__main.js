@@ -71,7 +71,7 @@ function EditProfile() {
     <div class="ov-body col" style="gap:14px">
       <div class="row" style="gap:10px;align-items:flex-start"><div class="grow"><${Field} label="Nom" req><input id="ep-nom" class="input" value=${f.nom} onInput=${set("nom")} /><//></div><div class="grow"><${Field} label="Prénoms" req><input id="ep-prenoms" class="input" value=${f.prenoms} onInput=${set("prenoms")} /><//></div></div>
       <${Field} label="Profession" req><input id="ep-prof" class="input" value=${f.profession} onInput=${set("profession")} /><//>
-      <${Field} label="Entreprise ou activité"><input id="ep-ent" class="input" value=${f.entreprise} onInput=${set("entreprise")} /><//>
+      <${Field} label="Entreprise / Administration"><input id="ep-ent" class="input" value=${f.entreprise} onInput=${set("entreprise")} /><//>
       <${Field} label="Présentation"><textarea id="ep-bio" class="input" value=${f.bio} onInput=${set("bio")} placeholder="Quelques mots sur vous et votre métier"></textarea><//>
       <${Field} label="Église" req><input id="ep-eglise" class="input" value=${f.eglise} onInput=${set("eglise")} /><//>
       <${Field} label="Assemblée" req><input id="ep-ass" class="input" value=${f.assemblee} onInput=${set("assemblee")} /><//>
