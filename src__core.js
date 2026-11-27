@@ -79,6 +79,11 @@ async function uploadFile(bucket, blob, name) {
   await q(sb.storage.from(bucket).upload(path, blob, { contentType: "image/jpeg", upsert: true }));
   return path;
 }
+async function uploadRaw(bucket, file, name, ext, type) {
+  const path = uid() + "/" + name + "-" + Date.now() + "." + ext;
+  await q(sb.storage.from(bucket).upload(path, file, { contentType: type, upsert: true }));
+  return path;
+}
 function publicUrl(bucket, path) { return sb.storage.from(bucket).getPublicUrl(path).data.publicUrl; }
 async function signedUrl(bucket, path) { const d = await q(sb.storage.from(bucket).createSignedUrl(path, 600)); return d.signedUrl; }
 
@@ -182,12 +187,20 @@ function Field({ label, req, hint, err, children }) {
   return html`<div class="field"><label>${label}${req && html` <span class="req">*</span>`}</label>${children}${hint && html`<span class="hint">${hint}</span>`}${err && html`<span class="err-msg">${err}</span>`}</div>`;
 }
 /* Sélection d'image : garde le fichier compressé (Blob) et un aperçu local */
-function Upload({ id, label, sub, preview, onFile, max = 1200, icon = "camera" }) {
+function Upload({ id, label, sub, preview, onFile, max = 1200, icon = "camera", done }) {
   const [busy, setBusy] = useState(false);
   return html`<label class="upload" for=${id}>
     <span class="thumb">${preview ? html`<img src=${preview} alt="" />` : html`<${Icon} n=${icon} s=${26} c="#8E6A1C" />`}</span>
-    <span class="grow col" style="gap:3px"><b style="font-size:14.5px">${busy ? "Préparation…" : preview ? "Image ajoutée · changer" : label}</b><span class="small muted">${sub}</span></span>
+    <span class="grow col" style="gap:3px"><b style="font-size:14.5px">${busy ? "Préparation…" : preview ? (done || "Image ajoutée · changer") : label}</b><span class="small muted">${sub}</span></span>
     <input id=${id} type="file" accept="image/*" onChange=${async e => { const f = e.target.files[0]; if (!f) return; setBusy(true); try { const b = await compress(f, max); onFile(b, URL.createObjectURL(b)); } catch (x) { toast("Impossible de lire cette image. Essayez une photo JPG ou PNG."); } setBusy(false); }} />
+  </label>`;
+}
+/* Sélection d'un fichier PDF (6 Mo maximum) */
+function PdfUpload({ id, label, sub, file, onFile }) {
+  return html`<label class="upload" for=${id}>
+    <span class="thumb">${file ? html`<span style="font:800 13px var(--f-head);color:#B91C1C">PDF</span>` : html`<${Icon} n="file" s=${26} c="#8E6A1C" />`}</span>
+    <span class="grow col" style="gap:3px;min-width:0"><b style="font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${file ? file.name : label}</b><span class="small muted">${file ? "Fichier ajouté · changer" : sub}</span></span>
+    <input id=${id} type="file" accept="application/pdf,.pdf" onChange=${e => { const f = e.target.files[0]; if (!f) return; if (!/pdf$/i.test(f.type) && !/\.pdf$/i.test(f.name)) { toast("Choisissez un fichier PDF."); return; } if (f.size > 6 * 1024 * 1024) { toast("Fichier trop lourd : 6 Mo maximum."); return; } onFile(f); }} />
   </label>`;
 }
 function Empty({ icon = "info", title, text, children }) {

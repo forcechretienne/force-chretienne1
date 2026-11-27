@@ -132,14 +132,22 @@ function Admin() {
     </div></div>`;
 }
 function Candidate({ k }) {
-  const [carte, setCarte] = useState(""); const [busy, setBusy] = useState("");
-  const view = async () => { if (carte) { setCarte(""); return; } if (!k.carte_path) { toast("Aucune carte envoyée."); return; } try { setCarte(await signedUrl("cards", k.carte_path)); } catch (e) { fail(e); } };
+  const [carte, setCarte] = useState(null); const [busy, setBusy] = useState("");
+  const isPdf = /\.pdf$/i.test(k.carte_path || "");
+  const view = async () => {
+    if (carte) { setCarte(null); return; }
+    if (!k.carte_path) { toast("Aucune carte envoyée."); return; }
+    try { setCarte({ recto: await signedUrl("cards", k.carte_path), verso: k.carte_verso_path ? await signedUrl("cards", k.carte_verso_path) : "" }); } catch (e) { fail(e); }
+  };
   const decide = async st => { setBusy(st); try { await q(sb.from("profiles").update({ status: st }).eq("id", k.id)); toast(st === "active" ? fullName(k) + " est maintenant membre." : "Adhésion refusée. Le demandeur est prévenu."); refresh(); } catch (e) { fail(e); } setBusy(""); };
   return html`<div class="card col" style="gap:10px">
     <span class="row"><${Avatar} p=${k} size=${48} /><span class="grow"><b>${fullName(k)}</b><br /><span class="small muted">${jobLine(k)}${k.ville ? " · " + k.ville : ""}</span></span><span class="tiny muted">${ago(k.created_at)}</span></span>
     <span class="small" style="line-height:1.6"><b>Église :</b> ${k.eglise}<br /><b>Assemblée :</b> ${k.assemblee}${k.naissance ? html`<br /><b>Né(e) le :</b> ${k.naissance.split("-").reverse().join("/")}` : ""}<br /><b>E-mail :</b> ${k.mail}${k.whatsapp ? html`<br /><b>WhatsApp :</b> ${k.whatsapp}` : ""}</span>
-    <button class="btn btn-line btn-sm" onClick=${view}><${Icon} n="card" s=${17} />${carte ? "Masquer" : "Voir"} la carte de membre</button>
-    ${carte && html`<a href=${carte} target="_blank" rel="noopener"><img src=${carte} alt=${"Carte de membre de " + fullName(k)} style="width:100%;border-radius:14px;border:1px solid var(--line);display:block" /></a>`}
+    <button class="btn btn-line btn-sm" onClick=${view}><${Icon} n=${isPdf ? "file" : "card"} s=${17} />${carte ? "Masquer" : "Voir"} la carte de membre${isPdf ? " (PDF)" : ""}</button>
+    ${carte && isPdf && html`<a class="btn btn-ink btn-sm" href=${carte.recto} target="_blank" rel="noopener"><${Icon} n="file" s=${16} />Ouvrir le PDF de la carte</a><span class="tiny muted center">Le PDF doit contenir le recto et le verso.</span>`}
+    ${carte && !isPdf && html`<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+      ${[["Recto", carte.recto], ["Verso", carte.verso]].map(([l, u]) => html`<div key=${l} class="col" style="gap:4px"><span class="tiny bold muted">${l}</span>${u ? html`<a href=${u} target="_blank" rel="noopener" title="Agrandir"><img src=${u} alt=${l + " de la carte de " + fullName(k)} style="width:100%;aspect-ratio:3/2;object-fit:cover;border-radius:12px;border:1px solid var(--line);display:block" /></a>` : html`<span class="small muted" style="aspect-ratio:3/2;border-radius:12px;background:var(--soft);display:flex;align-items:center;justify-content:center;text-align:center;padding:8px">Non fourni (ancienne inscription)</span>`}</div>`)}
+    </div><span class="tiny muted center">Touchez une photo pour l'agrandir.</span>`}
     <span class="row" style="gap:8px"><${Busy} on=${busy === "active"} cls="btn btn-gold btn-sm grow" onClick=${() => decide("active")}><${Icon} n="check" s=${17} w=${2.6} />Valider<//><${Busy} on=${busy === "refused"} cls="btn btn-danger btn-sm grow" onClick=${() => decide("refused")}>Refuser<//></span>
   </div>`;
 }

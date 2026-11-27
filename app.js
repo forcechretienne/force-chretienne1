@@ -81,6 +81,11 @@ async function uploadFile(bucket, blob, name) {
   await q(sb.storage.from(bucket).upload(path, blob, { contentType: "image/jpeg", upsert: true }));
   return path;
 }
+async function uploadRaw(bucket, file, name, ext, type) {
+  const path = uid() + "/" + name + "-" + Date.now() + "." + ext;
+  await q(sb.storage.from(bucket).upload(path, file, { contentType: type, upsert: true }));
+  return path;
+}
 function publicUrl(bucket, path) { return sb.storage.from(bucket).getPublicUrl(path).data.publicUrl; }
 async function signedUrl(bucket, path) { const d = await q(sb.storage.from(bucket).createSignedUrl(path, 600)); return d.signedUrl; }
 
@@ -184,12 +189,20 @@ function Field({ label, req, hint, err, children }) {
   return html`<div class="field"><label>${label}${req && html` <span class="req">*</span>`}</label>${children}${hint && html`<span class="hint">${hint}</span>`}${err && html`<span class="err-msg">${err}</span>`}</div>`;
 }
 /* Sélection d'image : garde le fichier compressé (Blob) et un aperçu local */
-function Upload({ id, label, sub, preview, onFile, max = 1200, icon = "camera" }) {
+function Upload({ id, label, sub, preview, onFile, max = 1200, icon = "camera", done }) {
   const [busy, setBusy] = useState(false);
   return html`<label class="upload" for=${id}>
     <span class="thumb">${preview ? html`<img src=${preview} alt="" />` : html`<${Icon} n=${icon} s=${26} c="#8E6A1C" />`}</span>
-    <span class="grow col" style="gap:3px"><b style="font-size:14.5px">${busy ? "Préparation…" : preview ? "Image ajoutée · changer" : label}</b><span class="small muted">${sub}</span></span>
+    <span class="grow col" style="gap:3px"><b style="font-size:14.5px">${busy ? "Préparation…" : preview ? (done || "Image ajoutée · changer") : label}</b><span class="small muted">${sub}</span></span>
     <input id=${id} type="file" accept="image/*" onChange=${async e => { const f = e.target.files[0]; if (!f) return; setBusy(true); try { const b = await compress(f, max); onFile(b, URL.createObjectURL(b)); } catch (x) { toast("Impossible de lire cette image. Essayez une photo JPG ou PNG."); } setBusy(false); }} />
+  </label>`;
+}
+/* Sélection d'un fichier PDF (6 Mo maximum) */
+function PdfUpload({ id, label, sub, file, onFile }) {
+  return html`<label class="upload" for=${id}>
+    <span class="thumb">${file ? html`<span style="font:800 13px var(--f-head);color:#B91C1C">PDF</span>` : html`<${Icon} n="file" s=${26} c="#8E6A1C" />`}</span>
+    <span class="grow col" style="gap:3px;min-width:0"><b style="font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${file ? file.name : label}</b><span class="small muted">${file ? "Fichier ajouté · changer" : sub}</span></span>
+    <input id=${id} type="file" accept="application/pdf,.pdf" onChange=${e => { const f = e.target.files[0]; if (!f) return; if (!/pdf$/i.test(f.type) && !/\.pdf$/i.test(f.name)) { toast("Choisissez un fichier PDF."); return; } if (f.size > 6 * 1024 * 1024) { toast("Fichier trop lourd : 6 Mo maximum."); return; } onFile(f); }} />
   </label>`;
 }
 function Empty({ icon = "info", title, text, children }) {
@@ -375,7 +388,10 @@ function ProfileSetup({ redo }) {
   const [step, setStep] = useState(redo ? 1 : 0);
   const [f, setF] = useState({ nom: me.nom || "", prenoms: me.prenoms || "", naissance: me.naissance || "", profession: me.profession || "", entreprise: me.entreprise || "", eglise: me.eglise || "", assemblee: me.assemblee || "", ville: me.ville || "", tel: me.tel || "", whatsapp: me.whatsapp || "", accept: !!redo });
   const [photo, setPhoto] = useState(null); const [photoPrev, setPhotoPrev] = useState(me.photo_url || "");
+  const [carteMode, setCarteMode] = useState("photos");
   const [carte, setCarte] = useState(null); const [cartePrev, setCartePrev] = useState("");
+  const [verso, setVerso] = useState(null); const [versoPrev, setVersoPrev] = useState("");
+  const [pdf, setPdf] = useState(null);
   const [errs, setErrs] = useState({}); const [busy, setBusy] = useState(false);
   const set = k => e => setF(Object.assign({}, f, { [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
   const need = [["nom", "prenoms", "naissance", "photo"], ["profession", "eglise", "assemblee", "carte"], ["accept"]];
@@ -383,7 +399,10 @@ function ProfileSetup({ redo }) {
     const e = {};
     need[step].forEach(k => {
       if (k === "photo") { if (!photo && !photoPrev) e.photo = "Ajoutez une photo de profil."; }
-      else if (k === "carte") { if (!carte) e.carte = "Ajoutez la photo de votre carte de membre."; }
+      else if (k === "carte") {
+        if (carteMode === "pdf") { if (!pdf) e.carte = "Ajoutez le fichier PDF de votre carte de membre (recto et verso)."; }
+        else if (!carte || !verso) e.carte = !carte && !verso ? "Ajoutez les photos du recto et du verso de votre carte." : !carte ? "Ajoutez la photo du recto de votre carte." : "Ajoutez la photo du verso de votre carte.";
+      }
       else if (k === "accept") { if (!f.accept) e.accept = "Veuillez accepter la charte pour continuer."; }
       else if (!String(f[k] || "").trim()) e[k] = "Ce champ est obligatoire.";
     });
@@ -394,8 +413,10 @@ function ProfileSetup({ redo }) {
     try {
       let photo_url = me.photo_url || "";
       if (photo) photo_url = publicUrl("avatars", await uploadFile("avatars", photo, "photo"));
-      const carte_path = carte ? await uploadFile("cards", carte, "carte") : me.carte_path;
-      const row = { id: uid(), nom: f.nom.trim().toUpperCase(), prenoms: f.prenoms.trim(), naissance: f.naissance || null, profession: f.profession.trim(), entreprise: f.entreprise.trim(), eglise: f.eglise.trim(), assemblee: f.assemblee.trim(), ville: f.ville.trim(), tel: f.tel.trim(), whatsapp: f.whatsapp.trim(), mail: S.session.user.email, photo_url, carte_path };
+      let carte_path = me.carte_path || "", carte_verso_path = me.carte_verso_path || "";
+      if (carteMode === "pdf" && pdf) { carte_path = await uploadRaw("cards", pdf, "carte", "pdf", "application/pdf"); carte_verso_path = ""; }
+      else if (carte && verso) { carte_path = await uploadFile("cards", carte, "carte-recto"); carte_verso_path = await uploadFile("cards", verso, "carte-verso"); }
+      const row = { id: uid(), nom: f.nom.trim().toUpperCase(), prenoms: f.prenoms.trim(), naissance: f.naissance || null, profession: f.profession.trim(), entreprise: f.entreprise.trim(), eglise: f.eglise.trim(), assemblee: f.assemblee.trim(), ville: f.ville.trim(), tel: f.tel.trim(), whatsapp: f.whatsapp.trim(), mail: S.session.user.email, photo_url, carte_path, carte_verso_path };
       if (S.me) await q(sb.from("profiles").update(row).eq("id", uid()));
       else await q(sb.from("profiles").insert(row));
       await loadMe(); refresh();
@@ -415,12 +436,21 @@ function ProfileSetup({ redo }) {
         <${Field} label="Date de naissance" req err=${errs.naissance}><input id="pf-naissance" type="date" class=${"input" + (errs.naissance ? " err" : "")} value=${f.naissance} onInput=${set("naissance")} /><//>
         <${Field} label="Photo de profil" req err=${errs.photo}><${Upload} id="pf-photo" label="Ajouter votre photo" sub="Visage bien visible, de face" preview=${photoPrev} max=${500} onFile=${(b, u) => { setPhoto(b); setPhotoPrev(u); }} /><//>`}
       ${step === 1 && html`
-        ${redo && html`<div class="demo-note" style="background:var(--warn-soft);color:var(--warn)">Votre adhésion n'a pas pu être validée. Vérifiez vos informations et envoyez une photo nette de votre carte de membre à jour.</div>`}
+        ${redo && html`<div class="demo-note" style="background:var(--warn-soft);color:var(--warn)">Votre adhésion n'a pas pu être validée. Vérifiez vos informations et envoyez le recto et le verso de votre carte de membre à jour.</div>`}
         <${Field} label="Profession" req err=${errs.profession}><input id="pf-profession" class=${"input" + (errs.profession ? " err" : "")} value=${f.profession} onInput=${set("profession")} placeholder="Responsable commercial" /><//>
         <${Field} label="Entreprise / Administration" hint="Entreprise privée, administration publique, ONG ou activité indépendante. Facultatif."><input id="pf-entreprise" class="input" value=${f.entreprise} onInput=${set("entreprise")} placeholder="Ex. Groupe Horizon, Ministère de la Santé…" /><//>
         <${Field} label="Église" req err=${errs.eglise}><input id="pf-eglise" class=${"input" + (errs.eglise ? " err" : "")} value=${f.eglise} onInput=${set("eglise")} placeholder="Église Évangélique Bethel" /><//>
         <${Field} label="Assemblée" req err=${errs.assemblee}><input id="pf-assemblee" class=${"input" + (errs.assemblee ? " err" : "")} value=${f.assemblee} onInput=${set("assemblee")} placeholder="Assemblée de Cocody Angré" /><//>
-        <${Field} label="Carte de membre" req err=${errs.carte} hint="Carte à jour, signée par l'autorité ecclésiastique. Seuls les administrateurs la voient."><${Upload} id="pf-carte" icon="card" label="Photographier votre carte" sub="Recto, lisible, sans reflet" preview=${cartePrev} max=${1400} onFile=${(b, u) => { setCarte(b); setCartePrev(u); }} /><//>`}
+        <${Field} label="Carte de membre" req err=${errs.carte} hint="Carte à jour, signée par l'autorité ecclésiastique. Seuls les administrateurs la voient.">
+          <div class="seg" style="margin-bottom:4px"><button type="button" class=${carteMode === "photos" ? "on" : ""} onClick=${() => { setCarteMode("photos"); setErrs(Object.assign({}, errs, { carte: "" })); }}>Photos recto / verso</button><button type="button" class=${carteMode === "pdf" ? "on" : ""} onClick=${() => { setCarteMode("pdf"); setErrs(Object.assign({}, errs, { carte: "" })); }}>Fichier PDF</button></div>
+          ${carteMode === "photos" ? html`<div class="col" style="gap:8px">
+            <${Upload} id="pf-carte" icon="card" label="Recto de la carte" done="Recto ajouté · changer" sub="Face avant, lisible, sans reflet" preview=${cartePrev} max=${1400} onFile=${(b, u) => { setCarte(b); setCartePrev(u); }} />
+            <${Upload} id="pf-carte-verso" icon="card" label="Verso de la carte" done="Verso ajouté · changer" sub="Face arrière, avec la signature" preview=${versoPrev} max=${1400} onFile=${(b, u) => { setVerso(b); setVersoPrev(u); }} />
+          </div>` : html`<div class="col" style="gap:8px">
+            <div class="demo-note" style="background:var(--gold-soft);color:#5B4612"><b>Important :</b> le fichier PDF doit contenir le recto et le verso de votre carte de membre.</div>
+            <${PdfUpload} id="pf-carte-pdf" label="Choisir le fichier PDF" sub="Recto et verso · 6 Mo maximum" file=${pdf} onFile=${setPdf} />
+          </div>`}
+        <//>`}
       ${step === 2 && html`
         <p class="muted small">Facultatif, mais utile pour que les membres vous joignent.</p>
         <${Field} label="Ville"><input id="pf-ville" class="input" value=${f.ville} onInput=${set("ville")} placeholder="Abidjan" /><//>
@@ -1404,14 +1434,22 @@ function Admin() {
     </div></div>`;
 }
 function Candidate({ k }) {
-  const [carte, setCarte] = useState(""); const [busy, setBusy] = useState("");
-  const view = async () => { if (carte) { setCarte(""); return; } if (!k.carte_path) { toast("Aucune carte envoyée."); return; } try { setCarte(await signedUrl("cards", k.carte_path)); } catch (e) { fail(e); } };
+  const [carte, setCarte] = useState(null); const [busy, setBusy] = useState("");
+  const isPdf = /\.pdf$/i.test(k.carte_path || "");
+  const view = async () => {
+    if (carte) { setCarte(null); return; }
+    if (!k.carte_path) { toast("Aucune carte envoyée."); return; }
+    try { setCarte({ recto: await signedUrl("cards", k.carte_path), verso: k.carte_verso_path ? await signedUrl("cards", k.carte_verso_path) : "" }); } catch (e) { fail(e); }
+  };
   const decide = async st => { setBusy(st); try { await q(sb.from("profiles").update({ status: st }).eq("id", k.id)); toast(st === "active" ? fullName(k) + " est maintenant membre." : "Adhésion refusée. Le demandeur est prévenu."); refresh(); } catch (e) { fail(e); } setBusy(""); };
   return html`<div class="card col" style="gap:10px">
     <span class="row"><${Avatar} p=${k} size=${48} /><span class="grow"><b>${fullName(k)}</b><br /><span class="small muted">${jobLine(k)}${k.ville ? " · " + k.ville : ""}</span></span><span class="tiny muted">${ago(k.created_at)}</span></span>
     <span class="small" style="line-height:1.6"><b>Église :</b> ${k.eglise}<br /><b>Assemblée :</b> ${k.assemblee}${k.naissance ? html`<br /><b>Né(e) le :</b> ${k.naissance.split("-").reverse().join("/")}` : ""}<br /><b>E-mail :</b> ${k.mail}${k.whatsapp ? html`<br /><b>WhatsApp :</b> ${k.whatsapp}` : ""}</span>
-    <button class="btn btn-line btn-sm" onClick=${view}><${Icon} n="card" s=${17} />${carte ? "Masquer" : "Voir"} la carte de membre</button>
-    ${carte && html`<a href=${carte} target="_blank" rel="noopener"><img src=${carte} alt=${"Carte de membre de " + fullName(k)} style="width:100%;border-radius:14px;border:1px solid var(--line);display:block" /></a>`}
+    <button class="btn btn-line btn-sm" onClick=${view}><${Icon} n=${isPdf ? "file" : "card"} s=${17} />${carte ? "Masquer" : "Voir"} la carte de membre${isPdf ? " (PDF)" : ""}</button>
+    ${carte && isPdf && html`<a class="btn btn-ink btn-sm" href=${carte.recto} target="_blank" rel="noopener"><${Icon} n="file" s=${16} />Ouvrir le PDF de la carte</a><span class="tiny muted center">Le PDF doit contenir le recto et le verso.</span>`}
+    ${carte && !isPdf && html`<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+      ${[["Recto", carte.recto], ["Verso", carte.verso]].map(([l, u]) => html`<div key=${l} class="col" style="gap:4px"><span class="tiny bold muted">${l}</span>${u ? html`<a href=${u} target="_blank" rel="noopener" title="Agrandir"><img src=${u} alt=${l + " de la carte de " + fullName(k)} style="width:100%;aspect-ratio:3/2;object-fit:cover;border-radius:12px;border:1px solid var(--line);display:block" /></a>` : html`<span class="small muted" style="aspect-ratio:3/2;border-radius:12px;background:var(--soft);display:flex;align-items:center;justify-content:center;text-align:center;padding:8px">Non fourni (ancienne inscription)</span>`}</div>`)}
+    </div><span class="tiny muted center">Touchez une photo pour l'agrandir.</span>`}
     <span class="row" style="gap:8px"><${Busy} on=${busy === "active"} cls="btn btn-gold btn-sm grow" onClick=${() => decide("active")}><${Icon} n="check" s=${17} w=${2.6} />Valider<//><${Busy} on=${busy === "refused"} cls="btn btn-danger btn-sm grow" onClick=${() => decide("refused")}>Refuser<//></span>
   </div>`;
 }

@@ -37,6 +37,7 @@ create table if not exists public.profiles (
   bio text default '',
   photo_url text default '',
   carte_path text default '',
+  carte_verso_path text default '',
   secteur text default '',
   status text not null default 'pending' check (status in ('pending','active','refused')),
   role text not null default 'member' check (role in ('member','admin')),
@@ -541,6 +542,9 @@ grant select on public.products, public.shops to anon;
 grant execute on all functions in schema public to anon, authenticated;
 revoke execute on function public.notify(uuid, text, text, text) from public, anon, authenticated;
 alter default privileges in schema public grant select, insert, update, delete on tables to authenticated;
+
+-- Ajout : verso de la carte de membre (recto/verso en photos, ou un PDF unique dans carte_path)
+alter table public.profiles add column if not exists carte_verso_path text default '';
 
 -- Fin. Vérification : la requête suivante doit afficher les deux e-mails administrateurs.
 select email as administrateurs from public.admin_emails;

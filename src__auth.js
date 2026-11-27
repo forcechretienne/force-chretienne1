@@ -158,7 +158,10 @@ function ProfileSetup({ redo }) {
   const [step, setStep] = useState(redo ? 1 : 0);
   const [f, setF] = useState({ nom: me.nom || "", prenoms: me.prenoms || "", naissance: me.naissance || "", profession: me.profession || "", entreprise: me.entreprise || "", eglise: me.eglise || "", assemblee: me.assemblee || "", ville: me.ville || "", tel: me.tel || "", whatsapp: me.whatsapp || "", accept: !!redo });
   const [photo, setPhoto] = useState(null); const [photoPrev, setPhotoPrev] = useState(me.photo_url || "");
+  const [carteMode, setCarteMode] = useState("photos");
   const [carte, setCarte] = useState(null); const [cartePrev, setCartePrev] = useState("");
+  const [verso, setVerso] = useState(null); const [versoPrev, setVersoPrev] = useState("");
+  const [pdf, setPdf] = useState(null);
   const [errs, setErrs] = useState({}); const [busy, setBusy] = useState(false);
   const set = k => e => setF(Object.assign({}, f, { [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
   const need = [["nom", "prenoms", "naissance", "photo"], ["profession", "eglise", "assemblee", "carte"], ["accept"]];
@@ -166,7 +169,10 @@ function ProfileSetup({ redo }) {
     const e = {};
     need[step].forEach(k => {
       if (k === "photo") { if (!photo && !photoPrev) e.photo = "Ajoutez une photo de profil."; }
-      else if (k === "carte") { if (!carte) e.carte = "Ajoutez la photo de votre carte de membre."; }
+      else if (k === "carte") {
+        if (carteMode === "pdf") { if (!pdf) e.carte = "Ajoutez le fichier PDF de votre carte de membre (recto et verso)."; }
+        else if (!carte || !verso) e.carte = !carte && !verso ? "Ajoutez les photos du recto et du verso de votre carte." : !carte ? "Ajoutez la photo du recto de votre carte." : "Ajoutez la photo du verso de votre carte.";
+      }
       else if (k === "accept") { if (!f.accept) e.accept = "Veuillez accepter la charte pour continuer."; }
       else if (!String(f[k] || "").trim()) e[k] = "Ce champ est obligatoire.";
     });
@@ -177,8 +183,10 @@ function ProfileSetup({ redo }) {
     try {
       let photo_url = me.photo_url || "";
       if (photo) photo_url = publicUrl("avatars", await uploadFile("avatars", photo, "photo"));
-      const carte_path = carte ? await uploadFile("cards", carte, "carte") : me.carte_path;
-      const row = { id: uid(), nom: f.nom.trim().toUpperCase(), prenoms: f.prenoms.trim(), naissance: f.naissance || null, profession: f.profession.trim(), entreprise: f.entreprise.trim(), eglise: f.eglise.trim(), assemblee: f.assemblee.trim(), ville: f.ville.trim(), tel: f.tel.trim(), whatsapp: f.whatsapp.trim(), mail: S.session.user.email, photo_url, carte_path };
+      let carte_path = me.carte_path || "", carte_verso_path = me.carte_verso_path || "";
+      if (carteMode === "pdf" && pdf) { carte_path = await uploadRaw("cards", pdf, "carte", "pdf", "application/pdf"); carte_verso_path = ""; }
+      else if (carte && verso) { carte_path = await uploadFile("cards", carte, "carte-recto"); carte_verso_path = await uploadFile("cards", verso, "carte-verso"); }
+      const row = { id: uid(), nom: f.nom.trim().toUpperCase(), prenoms: f.prenoms.trim(), naissance: f.naissance || null, profession: f.profession.trim(), entreprise: f.entreprise.trim(), eglise: f.eglise.trim(), assemblee: f.assemblee.trim(), ville: f.ville.trim(), tel: f.tel.trim(), whatsapp: f.whatsapp.trim(), mail: S.session.user.email, photo_url, carte_path, carte_verso_path };
       if (S.me) await q(sb.from("profiles").update(row).eq("id", uid()));
       else await q(sb.from("profiles").insert(row));
       await loadMe(); refresh();
@@ -198,12 +206,21 @@ function ProfileSetup({ redo }) {
         <${Field} label="Date de naissance" req err=${errs.naissance}><input id="pf-naissance" type="date" class=${"input" + (errs.naissance ? " err" : "")} value=${f.naissance} onInput=${set("naissance")} /><//>
         <${Field} label="Photo de profil" req err=${errs.photo}><${Upload} id="pf-photo" label="Ajouter votre photo" sub="Visage bien visible, de face" preview=${photoPrev} max=${500} onFile=${(b, u) => { setPhoto(b); setPhotoPrev(u); }} /><//>`}
       ${step === 1 && html`
-        ${redo && html`<div class="demo-note" style="background:var(--warn-soft);color:var(--warn)">Votre adhésion n'a pas pu être validée. Vérifiez vos informations et envoyez une photo nette de votre carte de membre à jour.</div>`}
+        ${redo && html`<div class="demo-note" style="background:var(--warn-soft);color:var(--warn)">Votre adhésion n'a pas pu être validée. Vérifiez vos informations et envoyez le recto et le verso de votre carte de membre à jour.</div>`}
         <${Field} label="Profession" req err=${errs.profession}><input id="pf-profession" class=${"input" + (errs.profession ? " err" : "")} value=${f.profession} onInput=${set("profession")} placeholder="Responsable commercial" /><//>
         <${Field} label="Entreprise / Administration" hint="Entreprise privée, administration publique, ONG ou activité indépendante. Facultatif."><input id="pf-entreprise" class="input" value=${f.entreprise} onInput=${set("entreprise")} placeholder="Ex. Groupe Horizon, Ministère de la Santé…" /><//>
         <${Field} label="Église" req err=${errs.eglise}><input id="pf-eglise" class=${"input" + (errs.eglise ? " err" : "")} value=${f.eglise} onInput=${set("eglise")} placeholder="Église Évangélique Bethel" /><//>
         <${Field} label="Assemblée" req err=${errs.assemblee}><input id="pf-assemblee" class=${"input" + (errs.assemblee ? " err" : "")} value=${f.assemblee} onInput=${set("assemblee")} placeholder="Assemblée de Cocody Angré" /><//>
-        <${Field} label="Carte de membre" req err=${errs.carte} hint="Carte à jour, signée par l'autorité ecclésiastique. Seuls les administrateurs la voient."><${Upload} id="pf-carte" icon="card" label="Photographier votre carte" sub="Recto, lisible, sans reflet" preview=${cartePrev} max=${1400} onFile=${(b, u) => { setCarte(b); setCartePrev(u); }} /><//>`}
+        <${Field} label="Carte de membre" req err=${errs.carte} hint="Carte à jour, signée par l'autorité ecclésiastique. Seuls les administrateurs la voient.">
+          <div class="seg" style="margin-bottom:4px"><button type="button" class=${carteMode === "photos" ? "on" : ""} onClick=${() => { setCarteMode("photos"); setErrs(Object.assign({}, errs, { carte: "" })); }}>Photos recto / verso</button><button type="button" class=${carteMode === "pdf" ? "on" : ""} onClick=${() => { setCarteMode("pdf"); setErrs(Object.assign({}, errs, { carte: "" })); }}>Fichier PDF</button></div>
+          ${carteMode === "photos" ? html`<div class="col" style="gap:8px">
+            <${Upload} id="pf-carte" icon="card" label="Recto de la carte" done="Recto ajouté · changer" sub="Face avant, lisible, sans reflet" preview=${cartePrev} max=${1400} onFile=${(b, u) => { setCarte(b); setCartePrev(u); }} />
+            <${Upload} id="pf-carte-verso" icon="card" label="Verso de la carte" done="Verso ajouté · changer" sub="Face arrière, avec la signature" preview=${versoPrev} max=${1400} onFile=${(b, u) => { setVerso(b); setVersoPrev(u); }} />
+          </div>` : html`<div class="col" style="gap:8px">
+            <div class="demo-note" style="background:var(--gold-soft);color:#5B4612"><b>Important :</b> le fichier PDF doit contenir le recto et le verso de votre carte de membre.</div>
+            <${PdfUpload} id="pf-carte-pdf" label="Choisir le fichier PDF" sub="Recto et verso · 6 Mo maximum" file=${pdf} onFile=${setPdf} />
+          </div>`}
+        <//>`}
       ${step === 2 && html`
         <p class="muted small">Facultatif, mais utile pour que les membres vous joignent.</p>
         <${Field} label="Ville"><input id="pf-ville" class="input" value=${f.ville} onInput=${set("ville")} placeholder="Abidjan" /><//>
