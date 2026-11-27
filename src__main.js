@@ -45,6 +45,7 @@ function MyProfile() {
     <div class="ov-body" style="padding-top:12px">
       <button class="menu-row" onClick=${openShop}><span class="ic" style="background:#FFC93C"><${Bag} s=${24} /></span><span class="grow">Ma boutique Joyau<br /><span class="tiny muted" style="font-weight:500">Vendre aux acheteurs de Joyau</span></span><${Icon} n="arrow" s=${18} c="#63666F" /></button>
       <button class="menu-row" onClick=${() => push("favs")}><span class="ic"><${Icon} n="heart" s=${19} /></span><span class="grow">Mes favoris Joyau</span><${Icon} n="arrow" s=${18} c="#63666F" /></button>
+      <button class="menu-row" onClick=${() => push("pushSettings")}><span class="ic"><${Icon} n="bell" s=${19} /></span><span class="grow">Notifications sur ce téléphone</span><${Icon} n="arrow" s=${18} c="#63666F" /></button>
       <button class="menu-row" onClick=${() => push("install")}><span class="ic"><${Icon} n="download" s=${19} /></span><span class="grow">Installer l'application</span><${Icon} n="arrow" s=${18} c="#63666F" /></button>
       ${isAdmin() && html`<button class="menu-row" onClick=${() => push("admin")}><span class="ic" style="background:var(--gold-soft)"><${Icon} n="shield" s=${19} c="#8E6A1C" /></span><span class="grow">Espace administrateur<br /><span class="tiny muted" style="font-weight:500">Adhésions, offres d'emploi, annonces</span></span><${Icon} n="arrow" s=${18} c="#63666F" /></button>`}
       <button class="menu-row" onClick=${() => push("password")}><span class="ic"><${Icon} n="lock" s=${19} /></span><span class="grow">Changer mon mot de passe</span><${Icon} n="arrow" s=${18} c="#63666F" /></button>
@@ -100,10 +101,25 @@ function ChangePassword() {
   </div></div>`;
 }
 
+function PushSettings() {
+  const [st, setSt] = useState("…"); const [busy, setBusy] = useState(false);
+  const reload = () => pushState().then(setSt);
+  useEffect(() => { reload(); }, []);
+  const off = async () => { setBusy(true); try { await disablePush(); toast("Notifications désactivées sur ce téléphone."); } catch (e) { fail(e); } setBusy(false); reload(); };
+  const test = async () => { try { const reg = await navigator.serviceWorker.ready; await reg.showNotification("Force Chrétienne", { body: "Les notifications fonctionnent sur ce téléphone.", icon: "/icon-192.png" }); } catch (e) { toast("Impossible d'afficher la notification de test."); } };
+  return html`<div class="overlay"><${OvHead} title="Notifications" />
+    <div class="ov-body col" style="gap:14px">
+      <p class="muted" style="line-height:1.55">Vous êtes prévenu sur ce téléphone pour : les nouveaux messages, les invitations et nouvelles relations, les commentaires et j'aime sur vos publications, les candidatures à vos offres, la validation de vos offres et de votre adhésion${isAdmin() ? ", et (administrateur) les adhésions et offres à valider" : ""}.</p>
+      ${st === "on" ? html`<div class="feature" style="background:var(--ok-soft)"><span class="ic"><${Icon} n="check" c="#15803D" /></span><span><b style="color:#15803D">Activées sur ce téléphone</b><br /><span class="small muted">Chaque appareil s'active séparément.</span></span></div>
+        <button class="btn btn-line btn-block" onClick=${test}>Envoyer une notification de test</button>
+        <${Busy} on=${busy} cls="btn btn-ghost btn-block" onClick=${off}>Désactiver sur ce téléphone<//>`
+        : html`<${PushCard} onDone=${reload} />`}
+    </div></div>`;
+}
+
 /* ---------- Installation (PWA) ---------- */
 let INSTALL_EVT = null;
 addEventListener("beforeinstallprompt", e => { e.preventDefault(); INSTALL_EVT = e; rerender(); });
-function isStandalone() { try { return matchMedia("(display-mode: standalone)").matches || navigator.standalone; } catch (e) { return false; } }
 function Install() {
   const [os, setOs] = useState(/iPhone|iPad|iPod/.test(navigator.userAgent) ? "ios" : "android");
   const step = (n, t) => html`<div class="row" style="align-items:flex-start;gap:12px"><span class="logo-sq" style="width:34px;height:34px;border-radius:11px;background:var(--gold);color:var(--ink);font-size:15px">${n}</span><span style="line-height:1.5;padding-top:6px">${t}</span></div>`;
@@ -219,6 +235,7 @@ function OverlayView({ o }) {
     case "editProfile": return html`<${EditProfile} />`;
     case "password": return html`<${ChangePassword} />`;
     case "install": return html`<${Install} />`;
+    case "pushSettings": return html`<${PushSettings} />`;
     case "admin": return isAdmin() ? html`<${Admin} />` : null;
   }
   return null;

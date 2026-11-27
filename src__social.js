@@ -78,6 +78,7 @@ function HomeTab() {
       <button class="btn btn-ghost btn-sm grow" onClick=${() => push("jobForm")}><${Icon} n="brief" s=${17} c="#8E6A1C" />Emploi</button>
       <button class="btn btn-ghost btn-sm grow" onClick=${() => push("compose", { kind: "Événement" })}><${Icon} n="calendar" s=${17} c="#8E6A1C" />Événement</button>
     </div>
+    ${!UI.pushHidden && html`<div style="margin-top:12px;position:relative"><${PushCard} compact onDone=${() => { UI.pushHidden = true; }} /></div>`}
     ${posts.loading && !list.length && html`<${Loading} />`}
     ${list.slice(0, 2).map(p => html`<${PostCard} key=${p.id} p=${p} />`)}
     ${strip}
@@ -292,8 +293,8 @@ function NewMsgSheet() {
 function Notifs() {
   const n = useData("notifs", () => q(sb.from("notifications").select("*").eq("user_id", uid()).order("created_at", { ascending: false }).limit(80)));
   useEffect(() => () => { sb.from("notifications").update({ read: true }).eq("user_id", uid()).eq("read", false).then(() => { delete CACHE.unread; refresh(); }); }, []);
-  const ic = { admin: "shield", person: "users", joyau: "store", comment: "comment", job: "brief" };
-  const open = x => { const l = x.link || ""; if (l.startsWith("profile:")) push("profile", { id: l.slice(8) }); else if (l === "network") go("network"); else if (l === "opps") { UI.opp = "jobs"; go("opps"); } else if (l === "home") go("home"); };
+  const ic = { admin: "shield", person: "users", joyau: "store", comment: "comment", job: "brief", like: "like" };
+  const open = x => { const l = x.link || ""; if (l.startsWith("profile:")) push("profile", { id: l.slice(8) }); else if (l === "network") go("network"); else if (l === "opps") { UI.opp = "jobs"; go("opps"); } else if (l === "home") go("home"); else if (l === "admin" && isAdmin()) { UI.stack = []; push("admin"); } };
   return html`<div class="overlay">
     <${OvHead} title="Notifications" right=${html`<button class="link" onClick=${async () => { await sb.from("notifications").update({ read: true }).eq("user_id", uid()); delete CACHE.unread; refresh(); }}>Tout lu</button>`} />
     <div class="ov-body" style="padding-top:4px">

@@ -546,5 +546,160 @@ alter default privileges in schema public grant select, insert, update, delete o
 -- Ajout : verso de la carte de membre (recto/verso en photos, ou un PDF unique dans carte_path)
 alter table public.profiles add column if not exists carte_verso_path text default '';
 
+-- ---------------------------------------------------------------------
+-- 13. Notifications sur les téléphones (Web Push)
+-- ---------------------------------------------------------------------
+create extension if not exists pg_net;
+
+-- Abonnements des téléphones (un par appareil)
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now()
+);
+alter table public.push_subscriptions enable row level security;
+drop policy if exists "mes appareils" on public.push_subscriptions;
+create policy "mes appareils" on public.push_subscriptions for select using (user_id = auth.uid());
+drop policy if exists "retirer mon appareil" on public.push_subscriptions;
+create policy "retirer mon appareil" on public.push_subscriptions for delete using (user_id = auth.uid());
+
+create or replace function public.save_push_subscription(p_endpoint text, p_p256dh text, p_auth text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not exists (select 1 from public.profiles where id = auth.uid()) then raise exception 'Profil introuvable'; end if;
+  delete from public.push_subscriptions where endpoint = p_endpoint;
+  insert into public.push_subscriptions(user_id, endpoint, p256dh, auth) values (auth.uid(), p_endpoint, p_p256dh, p_auth);
+end $$;
+grant execute on function public.save_push_subscription(text, text, text) to authenticated;
+
+-- File d'envoi et clés (privées : aucun accès depuis l'application)
+create table if not exists public.push_queue (
+  id bigserial primary key,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  title text not null,
+  body text not null default '',
+  url text not null default '/',
+  tag text not null default '',
+  created_at timestamptz not null default now(),
+  sent_at timestamptz
+);
+create table if not exists public.push_secrets (
+  id int primary key default 1,
+  public_key text not null,
+  private_jwk jsonb not null
+);
+alter table public.push_queue enable row level security;
+alter table public.push_secrets enable row level security;
+revoke all on public.push_queue, public.push_secrets from anon, authenticated;
+revoke all on sequence public.push_queue_id_seq from anon, authenticated;
+grant usage on schema public to service_role;
+grant all on public.push_secrets, public.push_queue, public.push_subscriptions to service_role;
+grant usage, select on sequence public.push_queue_id_seq to service_role;
+
+create or replace function public.enqueue_push(p_user uuid, p_title text, p_body text, p_url text, p_tag text) returns void
+language sql security definer set search_path = public as $$
+  insert into public.push_queue(user_id, title, body, url, tag) values (p_user, p_title, left(coalesce(p_body, ''), 180), coalesce(nullif(p_url, ''), '/'), coalesce(p_tag, ''));
+$$;
+revoke execute on function public.enqueue_push(uuid, text, text, text, text) from public, anon, authenticated;
+
+-- Chaque élément ajouté à la file déclenche l'envoi par la fonction « push »
+create or replace function public.on_push_queue() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  begin
+    perform net.http_post(
+      url := 'https://clfipjzoyuemaonphjmm.supabase.co/functions/v1/push',
+      body := jsonb_build_object('id', new.id),
+      headers := jsonb_build_object('Content-Type', 'application/json'),
+      timeout_milliseconds := 8000);
+  exception when others then null;
+  end;
+  return new;
+end $$;
+drop trigger if exists trg_push_queue on public.push_queue;
+create trigger trg_push_queue after insert on public.push_queue
+for each row execute function public.on_push_queue();
+
+-- Toute notification de l'application part aussi sur le téléphone
+create or replace function public.on_notification_push() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v_title text; v_url text;
+begin
+  v_title := case new.kind
+    when 'admin' then 'Force Chrétienne'
+    when 'person' then 'Mon réseau'
+    when 'comment' then 'Nouveau commentaire'
+    when 'like' then 'J''aime'
+    when 'job' then 'Opportunités'
+    else 'Force Chrétienne' end;
+  v_url := '/?open=' || coalesce(nullif(new.link, ''), 'notifs');
+  perform public.enqueue_push(new.user_id, v_title, new.text, v_url, new.id::text);
+  return new;
+end $$;
+drop trigger if exists trg_notification_push on public.notifications;
+create trigger trg_notification_push after insert on public.notifications
+for each row execute function public.on_notification_push();
+
+-- Nouveaux messages : notification directe (sans encombrer la liste des notifications)
+create or replace function public.on_message_push() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.enqueue_push(new.recipient, public.full_name(new.sender), new.text, '/?open=chat:' || new.sender, 'msg-' || new.sender);
+  return new;
+end $$;
+drop trigger if exists trg_message_push on public.messages;
+create trigger trg_message_push after insert on public.messages
+for each row execute function public.on_message_push();
+
+-- Nouvelles activités notifiées
+create or replace function public.on_like() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v_author uuid;
+begin
+  select author into v_author from public.posts where id = new.post_id;
+  if v_author is not null and v_author <> new.user_id then
+    perform public.notify(v_author, 'like', public.full_name(new.user_id) || ' a aimé votre publication.', 'home');
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_like on public.post_likes;
+create trigger trg_like after insert on public.post_likes
+for each row execute function public.on_like();
+
+-- Les administrateurs sont prévenus des demandes à traiter
+create or replace function public.notify_admins(p_text text) returns void
+language sql security definer set search_path = public as $$
+  select public.notify(id, 'admin', p_text, 'admin') from public.profiles where role = 'admin';
+$$;
+revoke execute on function public.notify_admins(text) from public, anon, authenticated;
+
+create or replace function public.on_profile_pending() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.status = 'pending' and (tg_op = 'INSERT' or old.status <> 'pending') then
+    perform public.notify_admins('Nouvelle demande d''adhésion : ' || new.prenoms || ' ' || new.nom || ' (' || new.eglise || ').');
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_profile_pending on public.profiles;
+create trigger trg_profile_pending after insert or update on public.profiles
+for each row execute function public.on_profile_pending();
+
+create or replace function public.on_job_pending() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.status = 'pending' and (tg_op = 'INSERT' or old.status <> 'pending') then
+    perform public.notify_admins('Offre d''emploi à valider : « ' || new.title || ' » (' || new.company || ').');
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_job_pending on public.jobs;
+create trigger trg_job_pending after insert or update on public.jobs
+for each row execute function public.on_job_pending();
+
+
 -- Fin. Vérification : la requête suivante doit afficher les deux e-mails administrateurs.
 select email as administrateurs from public.admin_emails;

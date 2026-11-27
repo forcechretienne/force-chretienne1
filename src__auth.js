@@ -8,6 +8,8 @@ async function boot() {
   try { const { data } = await sb.auth.getSession(); S.session = data.session; } catch (e) { console.error(e); }
   await loadMe();
   S.booted = true; rerender();
+  openFromUrl(location.search);
+  try { navigator.serviceWorker && navigator.serviceWorker.addEventListener("message", e => { if (e.data && e.data.type === "open") openFromUrl(new URL(e.data.url, location.origin).search); }); } catch (e) {}
   sb.auth.onAuthStateChange(async (ev, session) => {
     if (ev === "PASSWORD_RECOVERY") S.recovery = true;
     const changed = (session && session.user.id) !== (S.session && S.session.user.id);
@@ -17,6 +19,20 @@ async function boot() {
     refresh();
   });
   startRealtime();
+}
+/* Ouvre le bon écran quand on touche une notification (?open=…) */
+function openFromUrl(search) {
+  const v = new URLSearchParams(search || "").get("open");
+  if (!v) return;
+  try { history.replaceState(null, "", location.pathname); } catch (e) {}
+  for (const k in CACHE) delete CACHE[k];
+  if (!isMember()) { refresh(); return; }
+  if (v === "notifs") { UI.stack = []; push("notifs"); }
+  else if (v === "admin") { UI.stack = []; if (isAdmin()) push("admin"); }
+  else if (v === "network" || v === "home" || v === "opps" || v === "messages") go(v);
+  else if (v.startsWith("chat:")) { UI.tab = "messages"; UI.stack = []; push("chat", { id: v.slice(5) }); }
+  else if (v.startsWith("profile:")) { UI.stack = []; push("profile", { id: v.slice(8) }); }
+  refresh();
 }
 let RT = null;
 function startRealtime() {
@@ -248,6 +264,7 @@ function Pending() {
     </div>
     <div class="col" style="padding:0 20px;gap:10px">
       <div class="card row"><${Avatar} p=${me} size=${52} /><span class="grow"><b>${fullName(me)}</b><br /><span class="small muted">${me.profession} · ${me.eglise}</span></span><span class="pill pill-warn">En attente</span></div>
+      <${PushCard} title="Soyez prévenu de la validation" text="Recevez une notification sur ce téléphone dès que l'administrateur aura validé votre adhésion, même si l'application est fermée." />
       <div class="feature"><span class="ic" style="background:#FFC93C"><${Bag} s=${24} /></span><span class="grow"><b>En attendant, faites vos achats</b><br /><span class="small muted">Joyau est ouvert à tous.</span></span></div>
     </div>
     <div class="col" style="padding:22px 20px 32px;gap:10px;margin-top:auto">

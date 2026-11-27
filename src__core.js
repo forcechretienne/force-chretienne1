@@ -106,6 +106,62 @@ const AV_COLORS = [["#F3E7C6", "#5B4612"], ["#23262D", "#F6DC8A"], ["#E9E9EE", "
 function avColor(id) { let n = 0; for (const c of String(id)) n += c.charCodeAt(0); return AV_COLORS[n % AV_COLORS.length]; }
 function waNumber(p) { const d = String(p || "").replace(/\D/g, ""); if (!d) return ""; if (d.length === 10) return "225" + d; return d; }
 
+/* ===== Notifications sur le téléphone (Web Push) ===== */
+const PUSH_URL = window.FC_CONFIG.supabaseUrl + "/functions/v1/push";
+function isIOS() { return /iPhone|iPad|iPod/.test(navigator.userAgent); }
+function isStandalone() { try { return matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; } catch (e) { return false; } }
+function pushSupported() { return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window; }
+function b64ToU8(s) { const p = s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4); const b = atob(p); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
+async function pushState() {
+  if (!pushSupported()) return isIOS() && !isStandalone() ? "ios-install" : "unsupported";
+  if (Notification.permission === "denied") return "denied";
+  try { const reg = await navigator.serviceWorker.getRegistration(); const s = reg && await reg.pushManager.getSubscription(); return s && Notification.permission === "granted" ? "on" : "off"; } catch (e) { return "off"; }
+}
+async function enablePush() {
+  const st = await pushState();
+  if (st === "ios-install") throw new Error("IOS_INSTALL");
+  if (st === "unsupported") throw new Error("UNSUPPORTED");
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") throw new Error("DENIED");
+  if (!navigator.serviceWorker.controller) { try { await navigator.serviceWorker.register("/sw.js"); } catch (e) {} }
+  const reg = await navigator.serviceWorker.ready;
+  const r = await fetch(PUSH_URL, { method: "POST", headers: { "Content-Type": "application/json", apikey: window.FC_CONFIG.supabaseKey }, body: JSON.stringify({ action: "key" }) });
+  const { publicKey } = await r.json();
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(publicKey) });
+  const j = sub.toJSON();
+  await q(sb.rpc("save_push_subscription", { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth }));
+}
+async function disablePush() {
+  const reg = await navigator.serviceWorker.getRegistration(); const s = reg && await reg.pushManager.getSubscription();
+  if (s) { try { await sb.from("push_subscriptions").delete().eq("endpoint", s.endpoint); } catch (e) {} await s.unsubscribe(); }
+}
+function pushError(e) {
+  const m = e && e.message;
+  if (m === "IOS_INSTALL") return "Sur iPhone, ajoutez d'abord l'application à l'écran d'accueil (Partager → Sur l'écran d'accueil), puis activez les notifications depuis l'icône.";
+  if (m === "DENIED") return "Les notifications sont bloquées. Autorisez-les dans les réglages du navigateur pour ce site, puis réessayez.";
+  if (m === "UNSUPPORTED") return "Ce navigateur ne gère pas les notifications. Utilisez Chrome sur Android, ou l'application installée sur iPhone.";
+  return errText(e);
+}
+/* Carte « Activer les notifications » (inscription, accueil, profil) */
+function PushCard({ title, text, compact, onDone }) {
+  const [st, setSt] = useState("…");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { pushState().then(setSt); }, []);
+  const on = async () => { setBusy(true); setMsg(""); try { await enablePush(); setSt("on"); toast("Notifications activées sur ce téléphone."); onDone && onDone(); } catch (e) { setMsg(pushError(e)); pushState().then(setSt); } setBusy(false); };
+  if (st === "…" || (compact && st === "unsupported")) return null;
+  if (st === "on") return compact ? null : html`<div class="feature" style="background:var(--ok-soft)"><span class="ic"><${Icon} n="bell" c="#15803D" /></span><span><b style="color:#15803D">Notifications activées</b><br /><span class="small muted">Vous serez prévenu sur ce téléphone, même application fermée.</span></span></div>`;
+  return html`<div class="card col" style="gap:10px;border-color:var(--gold-line);background:#FFFCF4">
+    <span class="row" style="align-items:flex-start"><span class="icon-btn" style="background:var(--gold-soft);flex:none"><${Icon} n="bell" s=${21} c="#8E6A1C" /></span><span class="grow"><b>${title || "Activez les notifications"}</b><br /><span class="small muted" style="line-height:1.45">${text || "Messages, invitations, candidatures, validation de votre adhésion : soyez prévenu sur ce téléphone, même application fermée."}</span></span></span>
+    ${st === "ios-install" ? html`<span class="small" style="line-height:1.5;color:#5B4612">Sur iPhone : touchez <b>Partager</b> puis <b>Sur l'écran d'accueil</b>, ouvrez l'application depuis son icône, puis revenez ici.</span>`
+      : st === "denied" ? html`<span class="small" style="line-height:1.5;color:var(--danger)">Les notifications sont bloquées pour ce site. Autorisez-les dans les réglages du navigateur (icône à gauche de l'adresse → Notifications → Autoriser).</span>`
+      : st === "unsupported" ? html`<span class="small muted">Ce navigateur ne gère pas les notifications.</span>`
+      : html`<${Busy} on=${busy} cls="btn btn-gold btn-block" onClick=${on}><${Icon} n="bell" s=${18} />Activer les notifications<//>`}
+    ${msg && html`<span class="small" style="color:var(--danger);line-height:1.45">${msg}</span>`}
+  </div>`;
+}
+
 /* Favoris Joyau : gardés sur l'appareil */
 function getFavs() { try { return JSON.parse(localStorage.getItem("fc-favs") || "[]"); } catch (e) { return []; } }
 function toggleFav(id) { const f = getFavs(); const i = f.indexOf(id); if (i >= 0) f.splice(i, 1); else { f.push(id); toast("Ajouté à vos favoris."); } try { localStorage.setItem("fc-favs", JSON.stringify(f)); } catch (e) {} rerender(); }
