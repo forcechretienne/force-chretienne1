@@ -247,6 +247,8 @@ function SheetView({ s }) {
     case "wa": return html`<${WaSheet} msg=${s.msg} num=${s.num} seller=${s.seller} />`;
     case "newMsg": return html`<${NewMsgSheet} />`;
     case "confirm": return html`<${ConfirmSheet} ...${s} />`;
+    case "installJoyau": return html`<${InstallJoyauSheet} />`;
+    case "copy": return html`<${Sheet}><div class="col" style="gap:12px"><h2 style="font-size:19px">Copiez ce lien</h2><input id="copy-url" class="input" readonly value=${s.url} onFocus=${e => e.target.select()} /><button class="btn btn-ink btn-block" onClick=${closeSheet}>Fermer</button></div><//>`;
   }
   return null;
 }
@@ -261,6 +263,7 @@ function App() {
   const top = UI.stack[UI.stack.length - 1];
   let screen;
   if (!S.booted) screen = html`<div class="welcome" style="align-items:center;justify-content:center;gap:18px"><${Shield} s=${84} /><span class="spin"></span></div>`;
+  else if (JOYAU_MODE) screen = html`<main><${JoyauTab} /></main>`;
   else if (S.recovery && S.session) screen = html`<${NewPassword} />`;
   else if (UI.start === "login" && !S.session) screen = html`<${Login} />`;
   else if (UI.start === "signup" && !S.session) screen = html`<${Signup} />`;

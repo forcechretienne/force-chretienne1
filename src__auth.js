@@ -22,7 +22,16 @@ async function boot() {
 }
 /* Ouvre le bon écran quand on touche une notification (?open=…) */
 function openFromUrl(search) {
-  const v = new URLSearchParams(search || "").get("open");
+  const qs = new URLSearchParams(search || "");
+  const pId = qs.get("p"), sId = qs.get("s"), start = qs.get("start");
+  if (pId || sId || start) {
+    try { history.replaceState(null, "", location.pathname); } catch (e) {}
+    if (start === "signup" || start === "login") { if (!S.session) UI.start = start; }
+    else if (pId) { if (!JOYAU_MODE) { S.guest = S.guest || !isMember(); UI.tab = "joyau"; } UI.stack = []; push("product", { id: pId }); }
+    else if (sId) { if (!JOYAU_MODE) { S.guest = S.guest || !isMember(); UI.tab = "joyau"; } UI.stack = []; push("seller", { id: sId }); }
+    refresh(); return;
+  }
+  const v = qs.get("open");
   if (!v) return;
   try { history.replaceState(null, "", location.pathname); } catch (e) {}
   for (const k in CACHE) delete CACHE[k];

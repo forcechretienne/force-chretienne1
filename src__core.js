@@ -10,6 +10,15 @@ for (const k in UNSPLASH) IMG[k] = "https://images.unsplash.com/" + UNSPLASH[k] 
 const CATS = ["Tout", "Immobilier", "Services", "Gastronomie", "Mode", "Téléphones", "Bijoux & Montres", "Beauté", "Électroménager", "Maison", "Informatique", "Auto & Moto", "Bébé"];
 const PROFILE_COLS = "id,nom,prenoms,profession,entreprise,photo_url,eglise,assemblee,ville,status,role";
 
+/* Mode « Joyau seul » : ouvert par le lien /joyau (application Joyau installée à part) */
+const JOYAU_MODE = window.FC_MODE === "joyau";
+function goFC(start) { location.href = "/" + (start ? "?start=" + start : ""); }
+async function shareLink(title, text, url) {
+  try { if (navigator.share) { await navigator.share({ title, text, url }); return; } } catch (e) { if (e && e.name === "AbortError") return; }
+  try { await navigator.clipboard.writeText(url); toast("Lien copié : collez-le dans WhatsApp ou vos réseaux."); }
+  catch (e) { openSheet("copy", { url }); }
+}
+
 /* État global de l'interface */
 const S = { session: null, me: null, booted: false, guest: false, recovery: false };
 const UI = { tab: "home", stack: [], sheet: null, toast: "", toastT: 0, start: "" };
@@ -275,8 +284,8 @@ function JoinPrompt({ what }) {
       <${Shield} s=${58} />
       <h2 style="font-size:21px">Réservé aux membres</h2>
       <p class="muted" style="line-height:1.55"><b style="color:var(--ink)">${what || "Cette fonctionnalité"}</b> : accès réservé aux membres validés de Force Chrétienne. Vous pouvez continuer à acheter sur Joyau sans compte.</p>
-      <button class="btn btn-gold btn-block" onClick=${() => { S.guest = false; UI.sheet = null; UI.stack = []; UI.start = S.session ? "" : "signup"; rerender(); }}>${S.session ? "Voir mon adhésion" : "Rejoindre Force Chrétienne"}</button>
-      ${!S.session && html`<button class="btn btn-line btn-block" onClick=${() => { S.guest = false; UI.sheet = null; UI.stack = []; UI.start = "login"; rerender(); }}>J'ai déjà un compte</button>`}
+      <button class="btn btn-gold btn-block" onClick=${() => { if (JOYAU_MODE) { goFC(S.session ? "" : "signup"); return; } S.guest = false; UI.sheet = null; UI.stack = []; UI.start = S.session ? "" : "signup"; rerender(); }}>${S.session ? "Voir mon adhésion" : "Rejoindre Force Chrétienne"}</button>
+      ${!S.session && html`<button class="btn btn-line btn-block" onClick=${() => { if (JOYAU_MODE) { goFC("login"); return; } S.guest = false; UI.sheet = null; UI.stack = []; UI.start = "login"; rerender(); }}>J'ai déjà un compte</button>`}
       <button class="btn btn-ghost btn-block" onClick=${closeSheet}>Continuer sur Joyau</button>
     </div>
   <//>`;

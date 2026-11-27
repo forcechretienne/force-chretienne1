@@ -1,0 +1,18 @@
+{
+  "id": "/joyau",
+  "name": "Joyau",
+  "short_name": "Joyau",
+  "description": "Ici, on vend tout. La boutique de Force Chrétienne : commandez aux vendeurs sur WhatsApp.",
+  "lang": "fr",
+  "start_url": "/joyau",
+  "scope": "/joyau",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFFFFF",
+  "theme_color": "#FFC93C",
+  "icons": [
+    { "src": "/joyau-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/joyau-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/joyau-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

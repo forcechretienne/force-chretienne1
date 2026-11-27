@@ -7,9 +7,18 @@ Application web mobile (PWA) : Force Chrétienne (réseau social des professionn
 - Base : Supabase, projet `clfipjzoyuemaonphjmm` (URL et clé publique dans `config.js`)
 - Administrateurs : direction@zematechnologies.com, forcechretienne@proton.me (table `admin_emails`)
 
+## Joyau en application séparée
+- Lien direct : https://force-chretienne.vercel.app/joyau (page `joyau.html`, réécriture dans `vercel.json`), installable à part (manifeste `manifest-joyau.webmanifest`, icônes `joyau-*.png`). Le code est le même que l'application : `window.FC_MODE = "joyau"` active le mode boutique seule.
+- Liens de partage : produit `/joyau?p=<id>`, boutique `/joyau?s=<id>` (fonctionnent aussi avec `/?p=` dans Force Chrétienne).
+
+## Notifications sur téléphone (Web Push)
+- Fonction Supabase `push` (source : `supabase_push_function.ts`, vérification JWT désactivée, elle ne traite que les éléments réels de la file).
+- Tables `push_subscriptions` (appareils), `push_queue` (file d'envoi), `push_secrets` (clés VAPID créées automatiquement au premier appel). Déclencheurs : notifications, messages, j'aime, demandes à valider pour les admins.
+- Liens d'ouverture : `/?open=notifs|admin|network|home|opps|chat:<id>|profile:<id>`.
+
 ## Fichiers
-- **Sources à modifier** : `src__core.js` (socle, cache, icônes, composants), `src__auth.js` (comptes, inscription, adhésion), `src__social.js` (fil, réseau, profils, messagerie, notifications), `src__opps.js` (emplois, services, affaires), `src__joyau.js` (marketplace, boutiques), `src__main.js` (profil, admin, navigation, installation), `src__app.css` (styles), `tpl__index.html`, `tpl__sw.js`, `img__*.svg` (illustrations).
-- **Fichiers générés** (ne pas modifier à la main) : `app.js`, `app.css`, `index.html`, `sw.js` → produits par `python3 build.py`.
+- **Sources à modifier** : `src__core.js` (socle, cache, icônes, composants), `src__auth.js` (comptes, inscription, adhésion), `src__social.js` (fil, réseau, profils, messagerie, notifications), `src__opps.js` (emplois, services, affaires), `src__joyau.js` (marketplace, boutiques), `src__main.js` (profil, admin, navigation, installation), `src__app.css` (styles), `tpl__index.html`, `tpl__joyau.html`, `tpl__sw.js`, `img__*.svg` (illustrations).
+- **Fichiers générés** (ne pas modifier à la main) : `app.js`, `app.css`, `index.html`, `joyau.html`, `sw.js` → produits par `python3 build.py`.
 - **Fixes** : `config.js`, `manifest.webmanifest`, icônes PNG, bibliothèques `preact.umd.js`, `hooks.umd.js`, `htm.umd.js`, `supabase.js` (supabase-js 2.117.0).
 - `schema.sql` : structure complète de la base (rejouable sans perte de données). Toute modification de la base doit aussi y être ajoutée.
 - `test__mock.js` : faux client Supabase pour tester l'interface hors ligne.

@@ -12,6 +12,6 @@ js = '"use strict";\nconst IMG = ' + json.dumps(img) + ';\n' + '\n'.join(open(os
 open(os.path.join(d, 'app.js'), 'w', encoding='utf-8').write(js)
 open(os.path.join(d, 'app.css'), 'w', encoding='utf-8').write(open(os.path.join(d, 'src__app.css'), encoding='utf-8').read())
 V = time.strftime('%Y%m%d%H%M')
-for t in ['index.html', 'sw.js']:
+for t in ['index.html', 'joyau.html', 'sw.js']:
     open(os.path.join(d, t), 'w', encoding='utf-8').write(open(os.path.join(d, 'tpl__' + t), encoding='utf-8').read().replace('__V__', V))
 print('Build OK, version', V)

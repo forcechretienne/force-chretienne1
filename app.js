@@ -12,6 +12,15 @@ for (const k in UNSPLASH) IMG[k] = "https://images.unsplash.com/" + UNSPLASH[k] 
 const CATS = ["Tout", "Immobilier", "Services", "Gastronomie", "Mode", "Téléphones", "Bijoux & Montres", "Beauté", "Électroménager", "Maison", "Informatique", "Auto & Moto", "Bébé"];
 const PROFILE_COLS = "id,nom,prenoms,profession,entreprise,photo_url,eglise,assemblee,ville,status,role";
 
+/* Mode « Joyau seul » : ouvert par le lien /joyau (application Joyau installée à part) */
+const JOYAU_MODE = window.FC_MODE === "joyau";
+function goFC(start) { location.href = "/" + (start ? "?start=" + start : ""); }
+async function shareLink(title, text, url) {
+  try { if (navigator.share) { await navigator.share({ title, text, url }); return; } } catch (e) { if (e && e.name === "AbortError") return; }
+  try { await navigator.clipboard.writeText(url); toast("Lien copié : collez-le dans WhatsApp ou vos réseaux."); }
+  catch (e) { openSheet("copy", { url }); }
+}
+
 /* État global de l'interface */
 const S = { session: null, me: null, booted: false, guest: false, recovery: false };
 const UI = { tab: "home", stack: [], sheet: null, toast: "", toastT: 0, start: "" };
@@ -277,8 +286,8 @@ function JoinPrompt({ what }) {
       <${Shield} s=${58} />
       <h2 style="font-size:21px">Réservé aux membres</h2>
       <p class="muted" style="line-height:1.55"><b style="color:var(--ink)">${what || "Cette fonctionnalité"}</b> : accès réservé aux membres validés de Force Chrétienne. Vous pouvez continuer à acheter sur Joyau sans compte.</p>
-      <button class="btn btn-gold btn-block" onClick=${() => { S.guest = false; UI.sheet = null; UI.stack = []; UI.start = S.session ? "" : "signup"; rerender(); }}>${S.session ? "Voir mon adhésion" : "Rejoindre Force Chrétienne"}</button>
-      ${!S.session && html`<button class="btn btn-line btn-block" onClick=${() => { S.guest = false; UI.sheet = null; UI.stack = []; UI.start = "login"; rerender(); }}>J'ai déjà un compte</button>`}
+      <button class="btn btn-gold btn-block" onClick=${() => { if (JOYAU_MODE) { goFC(S.session ? "" : "signup"); return; } S.guest = false; UI.sheet = null; UI.stack = []; UI.start = S.session ? "" : "signup"; rerender(); }}>${S.session ? "Voir mon adhésion" : "Rejoindre Force Chrétienne"}</button>
+      ${!S.session && html`<button class="btn btn-line btn-block" onClick=${() => { if (JOYAU_MODE) { goFC("login"); return; } S.guest = false; UI.sheet = null; UI.stack = []; UI.start = "login"; rerender(); }}>J'ai déjà un compte</button>`}
       <button class="btn btn-ghost btn-block" onClick=${closeSheet}>Continuer sur Joyau</button>
     </div>
   <//>`;
@@ -308,7 +317,16 @@ async function boot() {
 }
 /* Ouvre le bon écran quand on touche une notification (?open=…) */
 function openFromUrl(search) {
-  const v = new URLSearchParams(search || "").get("open");
+  const qs = new URLSearchParams(search || "");
+  const pId = qs.get("p"), sId = qs.get("s"), start = qs.get("start");
+  if (pId || sId || start) {
+    try { history.replaceState(null, "", location.pathname); } catch (e) {}
+    if (start === "signup" || start === "login") { if (!S.session) UI.start = start; }
+    else if (pId) { if (!JOYAU_MODE) { S.guest = S.guest || !isMember(); UI.tab = "joyau"; } UI.stack = []; push("product", { id: pId }); }
+    else if (sId) { if (!JOYAU_MODE) { S.guest = S.guest || !isMember(); UI.tab = "joyau"; } UI.stack = []; push("seller", { id: sId }); }
+    refresh(); return;
+  }
+  const v = qs.get("open");
   if (!v) return;
   try { history.replaceState(null, "", location.pathname); } catch (e) {}
   for (const k in CACHE) delete CACHE[k];
@@ -1139,12 +1157,26 @@ function ProductCard({ p }) {
   </div>`;
 }
 
+async function installJoyau() {
+  if (typeof INSTALL_EVT !== "undefined" && INSTALL_EVT) { INSTALL_EVT.prompt(); try { await INSTALL_EVT.userChoice; } catch (e) {} INSTALL_EVT = null; rerender(); return; }
+  openSheet("installJoyau");
+}
+function InstallJoyauSheet() {
+  const ios = isIOS();
+  return html`<${Sheet}><div class="col j-scope" style="gap:14px">
+    <span class="row"><span class="j-logo"><span class="sq" style="width:54px;height:54px;border-radius:16px"><${Bag} s=${38} /></span></span><span><h2 style="font-size:19px">Installer Joyau</h2><span class="small" style="color:var(--j-muted)">Une icône sur votre écran d'accueil, comme une application.</span></span></span>
+    ${ios ? html`<div class="col" style="gap:10px;line-height:1.5"><span>1. Dans <b>Safari</b>, touchez <b>Partager</b> (le carré avec une flèche vers le haut).</span><span>2. Choisissez <b>Sur l'écran d'accueil</b>.</span><span>3. Touchez <b>Ajouter</b> : l'icône Joyau apparaît.</span></div>`
+      : html`<div class="col" style="gap:10px;line-height:1.5"><span>1. Ouvrez le menu <b>⋮</b> de Chrome, en haut à droite.</span><span>2. Touchez <b>Installer l'application</b> ou <b>Ajouter à l'écran d'accueil</b>.</span><span>3. Confirmez : l'icône Joyau apparaît.</span></div>`}
+    <button class="btn btn-j btn-block" onClick=${closeSheet}>J'ai compris</button>
+  </div><//>`;
+}
 function JoyauTop({ hasShop }) {
   const n = getFavs().length;
   return html`<div class="j-top">
     <div class="row">
-      ${isMember() && html`<button class="icon-btn" style="background:var(--j-soft)" aria-label="Retour à Force Chrétienne" onClick=${() => go("home")}><${Shield} s=${26} /></button>`}
-      <span class="grow"><${JoyauLogo} slogan=${!isMember()} /></span>
+      ${!JOYAU_MODE && isMember() && html`<button class="icon-btn" style="background:var(--j-soft)" aria-label="Retour à Force Chrétienne" onClick=${() => go("home")}><${Shield} s=${26} /></button>`}
+      <span class="grow"><${JoyauLogo} slogan=${JOYAU_MODE || !isMember()} /></span>
+      ${JOYAU_MODE && !isStandalone() && html`<button class="icon-btn" style="background:#FFF7DD" aria-label="Installer Joyau sur l'écran d'accueil" onClick=${installJoyau}><${Icon} n="download" s=${20} c="#1F3FC4" /></button>`}
       <button class="icon-btn" style="background:var(--j-soft)" aria-label=${"Mes favoris" + (n ? ", " + n : "")} onClick=${() => push("favs")}><${Icon} n="heart" s=${20} c="#0B1B3F" />${n ? html`<span class="badge">${n}</span>` : ""}</button>
       <button class="btn btn-sm" style="background:#D62839;color:#fff;padding:0 12px" onClick=${openShop}><${Icon} n="store" s=${17} />${hasShop ? "Ma boutique" : "Vendre"}</button>
     </div>
@@ -1171,7 +1203,7 @@ function JoyauTab() {
       <div class="chips">${CATS.map(c => html`<button key=${c} class=${"chip" + (c === cat ? " on" : "")} onClick=${() => setCat(c)}>${catIcon(c)}${c === "Services" ? "Prestations de services" : c}</button>`)}</div>
       ${!searching && html`
         <${Slider} slides=${HERO} />
-        ${!S.session && html`<div class="row" style="margin-top:12px;padding:12px 14px;border-radius:16px;background:#FFF7DD"><${Shield} s=${30} /><span class="grow small" style="line-height:1.45"><b>Vous êtes membre d'une église ?</b> Rejoignez Force Chrétienne pour vendre et réseauter.</span><button class="btn btn-sm" style="background:#0B1B3F;color:#fff" onClick=${() => { S.guest = false; UI.start = "signup"; rerender(); }}>Rejoindre</button></div>`}
+        ${!S.session && html`<div class="row" style="margin-top:12px;padding:12px 14px;border-radius:16px;background:#FFF7DD"><${Shield} s=${30} /><span class="grow small" style="line-height:1.45"><b>Vous êtes membre d'une église ?</b> Rejoignez Force Chrétienne pour vendre et réseauter.</span><button class="btn btn-sm" style="background:#0B1B3F;color:#fff" onClick=${() => { if (JOYAU_MODE) { goFC("signup"); return; } S.guest = false; UI.start = "signup"; rerender(); }}>Rejoindre</button></div>`}
         <div class="section-title"><h2>Explorer les univers</h2></div>
         <div class="bento">
           <button style="background:#D62839;color:#fff" onClick=${() => setCat("Gastronomie")}><strong>Gastronomie</strong><span class="s">Plats, jus, pâtisseries</span><img src=${IMG.attieke} alt="" /></button>
@@ -1204,6 +1236,7 @@ function JoyauTab() {
           <p style="position:relative;color:#DCE7FF;font-size:14px;line-height:1.5">Boutique gratuite pour les membres de Force Chrétienne. Les commandes arrivent sur votre WhatsApp.</p>
           <button class="btn btn-jy" style="position:relative;align-self:flex-start" onClick=${openShop}>${myShop.data ? "Gérer ma boutique" : "Créer ma boutique"}</button>
         </div>`}
+      ${JOYAU_MODE && html`<a href="/" class="row" style="margin-top:22px;padding:14px;border-radius:18px;background:var(--soft);text-decoration:none;color:var(--ink)"><${Shield} s=${34} /><span class="grow small" style="line-height:1.45">Joyau est la boutique de <b>Force Chrétienne</b>, le réseau des professionnels chrétiens.</span><${Icon} n="arrow" s=${18} /></a>`}
     </div>
   </div>`;
 }
@@ -1226,7 +1259,7 @@ function Product({ id }) {
   lines.push("• Quantité : " + n, "• Prix unitaire : " + fmt(p.price), "• Total : " + fmt(p.price * n), "", "Merci de me confirmer la disponibilité, le paiement et la livraison.");
   const msg = lines.join("\n");
   return html`<div class="overlay j-scope">
-    <${OvHead} title=${shop.name || "Joyau"} right=${html`<button class="icon-btn" style="background:var(--j-soft)" aria-label=${fav ? "Retirer des favoris" : "Ajouter aux favoris"} onClick=${() => toggleFav(p.id)}><${Icon} n="heart" s=${20} c=${fav ? "#D62839" : "#0B1B3F"} fill=${fav ? "#D62839" : "none"} /></button>`} />
+    <${OvHead} title=${shop.name || "Joyau"} right=${html`<button class="icon-btn" style="background:var(--j-soft)" aria-label="Partager ce produit" onClick=${() => shareLink(p.name, p.name + " à " + fmt(p.price) + " sur Joyau", location.origin + "/joyau?p=" + p.id)}><${Icon} n="share" s=${19} c="#0B1B3F" /></button><button class="icon-btn" style="background:var(--j-soft)" aria-label=${fav ? "Retirer des favoris" : "Ajouter aux favoris"} onClick=${() => toggleFav(p.id)}><${Icon} n="heart" s=${20} c=${fav ? "#D62839" : "#0B1B3F"} fill=${fav ? "#D62839" : "none"} /></button>`} />
     <div style="aspect-ratio:1/1;max-height:420px;width:100%;background:var(--j-soft);overflow:hidden"><img src=${p.photo_url} alt=${p.name} style="width:100%;height:100%;object-fit:cover;display:block" /></div>
     <div class="ov-body col" style="gap:16px">
       ${p.status !== "online" && html`<div class="demo-note" style="background:var(--warn-soft);color:var(--warn)">${p.status === "hidden_admin" ? "Annonce masquée par l'administrateur." : "Annonce masquée : seuls vous la voyez."}</div>`}
@@ -1238,6 +1271,7 @@ function Product({ id }) {
       <div class="row" style="justify-content:space-between"><div class="qty"><button aria-label="Diminuer la quantité" onClick=${() => setN(Math.max(1, n - 1))}>−</button><span>${n}</span><button aria-label="Augmenter la quantité" onClick=${() => setN(n + 1)}>+</button></div><span style="text-align:right"><span class="small" style="color:var(--j-muted)">Total</span><br /><b style="font-family:var(--f-head);font-size:24px">${fmt(p.price * n)}</b></span></div>
       <button class="btn btn-j btn-block" style="height:58px;font-size:17px" onClick=${() => { sb.rpc("product_click", { p_id: p.id }).then(() => {}, () => {}); openSheet("wa", { msg, num: waNumber(shop.whatsapp), seller: shop.name }); }}><${Icon} n="wa" s=${22} />Commander sur WhatsApp</button>
       <p class="center small" style="color:var(--j-muted);margin-top:-8px">Paiement et livraison à convenir directement avec le vendeur.</p>
+      <button class="btn btn-line btn-block" style="border-color:var(--j-line);color:#1D4ED8" onClick=${() => shareLink(p.name, p.name + " à " + fmt(p.price) + " sur Joyau", location.origin + "/joyau?p=" + p.id)}><${Icon} n="share" s=${18} />Partager ce produit</button>
       ${others.length > 0 && html`<div><div class="section-title" style="margin-top:8px"><h2 style="font-size:18px">Du même vendeur</h2></div><div class="pgrid">${others.map(x => html`<${ProductCard} key=${x.id} p=${x} />`)}</div></div>`}
     </div>
   </div>`;
@@ -1257,7 +1291,7 @@ function Seller({ id }) {
   const prods = useData("shop-products:" + id, () => q(sb.from("products").select(PROD_SEL).eq("shop_id", id).eq("status", "online").order("created_at", { ascending: false })));
   const s = shop.data || {};
   const list = prods.data || [];
-  return html`<div class="overlay j-scope"><${OvHead} title=${s.name || "Boutique"} />
+  return html`<div class="overlay j-scope"><${OvHead} title=${s.name || "Boutique"} right=${s.id && html`<button class="icon-btn" style="background:var(--j-soft)" aria-label="Partager la boutique" onClick=${() => shareLink(s.name, "La boutique " + s.name + " sur Joyau", location.origin + "/joyau?s=" + s.id)}><${Icon} n="share" s=${19} c="#0B1B3F" /></button>`} />
     <div style="background:#1D4ED8;color:#fff;padding:22px 16px;position:relative;overflow:hidden" class="row">
       <span style="position:absolute;right:-50px;top:-70px;width:180px;height:180px;border-radius:999px;border:30px solid #2563EB"></span>
       <span class="logo-sq" style="position:relative;width:64px;height:64px;font-size:22px;background:#FFC93C;color:#0B1B3F">${initials(s.name)}</span>
@@ -1294,6 +1328,7 @@ function Shop() {
       <div class="row" style="gap:8px"><div class="stat"><b>${list.filter(p => p.status === "online").length}</b><span>en ligne</span></div><div class="stat"><b>${views}</b><span>vues</span></div><div class="stat"><b>${clicks}</b><span>commandes WhatsApp</span></div></div>
       <button class="btn btn-j btn-block" onClick=${() => push("productForm", { shop: s })}><${Icon} n="plus" s=${19} w=${2.6} />Ajouter un produit ou un service</button>
       <button class="btn btn-line btn-block" onClick=${() => push("seller", { id: s.id })}><${Icon} n="eye" s=${18} />Voir ma boutique comme un acheteur</button>
+      <button class="btn btn-line btn-block" onClick=${() => shareLink(s.name, "Découvrez ma boutique " + s.name + " sur Joyau", location.origin + "/joyau?s=" + s.id)}><${Icon} n="share" s=${18} />Partager le lien de ma boutique</button>
       <div class="section-title" style="margin:6px 0 0"><h2 style="font-size:18px">Mes annonces</h2></div>
       ${list.map(p => html`<div key=${p.id} class="card row" style="border-color:var(--j-line);align-items:flex-start">
         <span style="width:68px;height:68px;border-radius:14px;background:var(--j-soft);flex:none;overflow:hidden"><img src=${p.photo_url} alt="" style="width:100%;height:100%;object-fit:cover" loading="lazy" /></span>
@@ -1624,6 +1659,8 @@ function SheetView({ s }) {
     case "wa": return html`<${WaSheet} msg=${s.msg} num=${s.num} seller=${s.seller} />`;
     case "newMsg": return html`<${NewMsgSheet} />`;
     case "confirm": return html`<${ConfirmSheet} ...${s} />`;
+    case "installJoyau": return html`<${InstallJoyauSheet} />`;
+    case "copy": return html`<${Sheet}><div class="col" style="gap:12px"><h2 style="font-size:19px">Copiez ce lien</h2><input id="copy-url" class="input" readonly value=${s.url} onFocus=${e => e.target.select()} /><button class="btn btn-ink btn-block" onClick=${closeSheet}>Fermer</button></div><//>`;
   }
   return null;
 }
@@ -1638,6 +1675,7 @@ function App() {
   const top = UI.stack[UI.stack.length - 1];
   let screen;
   if (!S.booted) screen = html`<div class="welcome" style="align-items:center;justify-content:center;gap:18px"><${Shield} s=${84} /><span class="spin"></span></div>`;
+  else if (JOYAU_MODE) screen = html`<main><${JoyauTab} /></main>`;
   else if (S.recovery && S.session) screen = html`<${NewPassword} />`;
   else if (UI.start === "login" && !S.session) screen = html`<${Login} />`;
   else if (UI.start === "signup" && !S.session) screen = html`<${Signup} />`;
