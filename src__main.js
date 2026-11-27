@@ -61,7 +61,8 @@ function EditProfile() {
   const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
   const set = k => e => setF(Object.assign({}, f, { [k]: e.target.value }));
   const saveP = async () => {
-    if (!f.nom.trim() || !f.prenoms.trim() || !f.profession.trim() || !f.eglise.trim() || !f.assemblee.trim()) { setErr("Nom, prénoms, profession, église et assemblée sont obligatoires."); return; }
+    if (!f.nom.trim() || !f.prenoms.trim() || !f.profession.trim() || !f.eglise.trim() || !f.assemblee.trim() || !f.tel.trim()) { setErr("Nom, prénoms, profession, église, assemblée et téléphone sont obligatoires."); return; }
+    if (f.tel.replace(/\D/g, "").length < 8) { setErr("Numéro de téléphone incomplet."); return; }
     setBusy(true);
     try { const row = {}; for (const k in f) row[k] = f[k].trim(); row.nom = row.nom.toUpperCase(); await q(sb.from("profiles").update(row).eq("id", uid())); await loadMe(); back(); refresh(); toast("Profil enregistré."); }
     catch (e) { fail(e); }
@@ -76,7 +77,7 @@ function EditProfile() {
       <${Field} label="Église" req><input id="ep-eglise" class="input" value=${f.eglise} onInput=${set("eglise")} /><//>
       <${Field} label="Assemblée" req><input id="ep-ass" class="input" value=${f.assemblee} onInput=${set("assemblee")} /><//>
       <${Field} label="Ville"><input id="ep-ville" class="input" value=${f.ville} onInput=${set("ville")} /><//>
-      <${Field} label="Téléphone"><input id="ep-tel" class="input" inputmode="tel" value=${f.tel} onInput=${set("tel")} /><//>
+      <${Field} label="Téléphone" req><input id="ep-tel" class="input" inputmode="tel" value=${f.tel} onInput=${set("tel")} /><//>
       <${Field} label="WhatsApp" hint="Visible par vos relations uniquement."><input id="ep-wa" class="input" inputmode="tel" value=${f.whatsapp} onInput=${set("whatsapp")} /><//>
       ${err && html`<span class="err-msg">${err}</span>`}
       <${Busy} on=${busy} onClick=${saveP}>Enregistrer<//>

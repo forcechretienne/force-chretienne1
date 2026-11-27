@@ -394,7 +394,7 @@ function ProfileSetup({ redo }) {
   const [pdf, setPdf] = useState(null);
   const [errs, setErrs] = useState({}); const [busy, setBusy] = useState(false);
   const set = k => e => setF(Object.assign({}, f, { [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
-  const need = [["nom", "prenoms", "naissance", "photo"], ["profession", "eglise", "assemblee", "carte"], ["accept"]];
+  const need = [["nom", "prenoms", "naissance", "photo"], ["profession", "eglise", "assemblee", "carte"], ["tel", "accept"]];
   const next = async () => {
     const e = {};
     need[step].forEach(k => {
@@ -404,6 +404,7 @@ function ProfileSetup({ redo }) {
         else if (!carte || !verso) e.carte = !carte && !verso ? "Ajoutez les photos du recto et du verso de votre carte." : !carte ? "Ajoutez la photo du recto de votre carte." : "Ajoutez la photo du verso de votre carte.";
       }
       else if (k === "accept") { if (!f.accept) e.accept = "Veuillez accepter la charte pour continuer."; }
+      else if (k === "tel") { if (String(f.tel || "").replace(/\D/g, "").length < 8) e.tel = f.tel.trim() ? "Numéro de téléphone incomplet." : "Le téléphone est obligatoire."; }
       else if (!String(f[k] || "").trim()) e[k] = "Ce champ est obligatoire.";
     });
     setErrs(e);
@@ -452,9 +453,9 @@ function ProfileSetup({ redo }) {
           </div>`}
         <//>`}
       ${step === 2 && html`
-        <p class="muted small">Facultatif, mais utile pour que les membres vous joignent.</p>
+        <p class="muted small">Le téléphone est obligatoire. La ville et le WhatsApp sont facultatifs, mais utiles pour que les membres vous joignent.</p>
         <${Field} label="Ville"><input id="pf-ville" class="input" value=${f.ville} onInput=${set("ville")} placeholder="Abidjan" /><//>
-        <${Field} label="Téléphone"><input id="pf-tel" class="input" inputmode="tel" value=${f.tel} onInput=${set("tel")} placeholder="07 00 00 00 00" /><//>
+        <${Field} label="Téléphone" req err=${errs.tel}><input id="pf-tel" class=${"input" + (errs.tel ? " err" : "")} type="tel" inputmode="tel" autocomplete="tel" value=${f.tel} onInput=${set("tel")} placeholder="07 00 00 00 00" /><//>
         <${Field} label="WhatsApp" hint="Indispensable pour vendre sur Joyau : les commandes arrivent sur ce numéro."><input id="pf-wa" class="input" inputmode="tel" value=${f.whatsapp} onInput=${set("whatsapp")} placeholder="07 00 00 00 00" /><//>
         <label class="row" style="align-items:flex-start;gap:10px;font-size:14px;line-height:1.5"><input id="pf-accept" type="checkbox" checked=${f.accept} onChange=${set("accept")} style="width:20px;height:20px;margin-top:2px;accent-color:#B8892B" /><span>J'adhère à la charte de Force Chrétienne : respect, honnêteté dans les affaires et bienveillance entre membres.</span></label>
         ${errs.accept && html`<span class="err-msg">${errs.accept}</span>`}`}
@@ -1363,7 +1364,8 @@ function EditProfile() {
   const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
   const set = k => e => setF(Object.assign({}, f, { [k]: e.target.value }));
   const saveP = async () => {
-    if (!f.nom.trim() || !f.prenoms.trim() || !f.profession.trim() || !f.eglise.trim() || !f.assemblee.trim()) { setErr("Nom, prénoms, profession, église et assemblée sont obligatoires."); return; }
+    if (!f.nom.trim() || !f.prenoms.trim() || !f.profession.trim() || !f.eglise.trim() || !f.assemblee.trim() || !f.tel.trim()) { setErr("Nom, prénoms, profession, église, assemblée et téléphone sont obligatoires."); return; }
+    if (f.tel.replace(/\D/g, "").length < 8) { setErr("Numéro de téléphone incomplet."); return; }
     setBusy(true);
     try { const row = {}; for (const k in f) row[k] = f[k].trim(); row.nom = row.nom.toUpperCase(); await q(sb.from("profiles").update(row).eq("id", uid())); await loadMe(); back(); refresh(); toast("Profil enregistré."); }
     catch (e) { fail(e); }
@@ -1378,7 +1380,7 @@ function EditProfile() {
       <${Field} label="Église" req><input id="ep-eglise" class="input" value=${f.eglise} onInput=${set("eglise")} /><//>
       <${Field} label="Assemblée" req><input id="ep-ass" class="input" value=${f.assemblee} onInput=${set("assemblee")} /><//>
       <${Field} label="Ville"><input id="ep-ville" class="input" value=${f.ville} onInput=${set("ville")} /><//>
-      <${Field} label="Téléphone"><input id="ep-tel" class="input" inputmode="tel" value=${f.tel} onInput=${set("tel")} /><//>
+      <${Field} label="Téléphone" req><input id="ep-tel" class="input" inputmode="tel" value=${f.tel} onInput=${set("tel")} /><//>
       <${Field} label="WhatsApp" hint="Visible par vos relations uniquement."><input id="ep-wa" class="input" inputmode="tel" value=${f.whatsapp} onInput=${set("whatsapp")} /><//>
       ${err && html`<span class="err-msg">${err}</span>`}
       <${Busy} on=${busy} onClick=${saveP}>Enregistrer<//>
