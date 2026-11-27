@@ -25,14 +25,33 @@ function openShop() { if (!isMember()) { openSheet("join", { what: "La vente sur
 
 function Slider({ slides, sponso }) {
   const [i, setI] = useState(0);
-  // Défilement automatique toutes les 3 secondes (le minuteur repart à chaque changement de diapositive)
+  const [dx, setDx] = useState(0);
+  const [tick, setTick] = useState(0);
+  const drag = useRef(null);
+  const moved = useRef(false);
+  const n = slides.length;
+  // Défilement automatique toutes les 3 secondes (le minuteur repart après chaque changement ou glissement)
   useEffect(() => {
-    const t = setTimeout(() => setI(x => (x + 1) % slides.length), 3000);
+    const t = setTimeout(() => { if (drag.current) setTick(x => x + 1); else setI(x => (x + 1) % n); }, 3000);
     return () => clearTimeout(t);
-  }, [i]);
+  }, [i, tick]);
+  // Glisser du doigt (ou de la souris) pour changer de diapositive
+  const down = e => { if (e.pointerType === "mouse" && e.button !== 0) return; drag.current = { x: e.clientX, y: e.clientY, w: e.currentTarget.offsetWidth, axis: null }; moved.current = false; };
+  const move = e => {
+    const d = drag.current; if (!d) return;
+    const mx = e.clientX - d.x, my = e.clientY - d.y;
+    if (!d.axis && (Math.abs(mx) > 6 || Math.abs(my) > 6)) { d.axis = Math.abs(mx) > Math.abs(my) ? "x" : "y"; if (d.axis === "x") { moved.current = true; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} } }
+    if (d.axis === "x") { const edge = (i === 0 && mx > 0) || (i === n - 1 && mx < 0); setDx(edge ? mx * 0.35 : mx); }
+  };
+  const up = () => {
+    const d = drag.current; drag.current = null; if (!d) return;
+    if (d.axis === "x") { const lim = Math.min(80, d.w * 0.18); if (dx < -lim) setI(x => Math.min(n - 1, x + 1)); else if (dx > lim) setI(x => Math.max(0, x - 1)); else setTick(x => x + 1); }
+    setDx(0);
+  };
   const dark = slides[i].fg !== "#fff";
-  return html`<div class="slider">
-    <div class="track" style=${"transform:translateX(-" + i * 100 + "%)"}>
+  const dragging = dx !== 0;
+  return html`<div class="slider" style="touch-action:pan-y;user-select:none;-webkit-user-select:none" onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onPointerLeave=${e => { if (drag.current && e.pointerType === "mouse") up(); }} onClickCapture=${e => { if (moved.current) { e.preventDefault(); e.stopPropagation(); moved.current = false; } }} onDragStart=${e => e.preventDefault()}>
+    <div class="track" style=${"transform:translateX(calc(-" + i * 100 + "% + " + dx + "px))" + (dragging ? ";transition:none" : "")}>
       ${slides.map((x, k) => html`<div key=${k} class="slide" style=${"background:" + x.bg + ";color:" + x.fg} aria-hidden=${k !== i}>
         <span class="deco1" style=${"background:" + x.d1}></span><span class="deco2" style=${"border:2px solid " + x.d2}></span>
         <div class="txt"><span class="tag" style=${"background:" + x.tagBg + ";color:" + x.tagFg}>${x.tag}</span><h3>${x.title}</h3><span style=${"font-size:13px;line-height:1.4;color:" + x.sub}>${x.text}</span>
