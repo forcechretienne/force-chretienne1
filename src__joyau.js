@@ -12,16 +12,116 @@ const ADS1 = [
 const ADS2 = [
   { tag: "HIGH-TECH", title: "Le bon smartphone, au juste prix.", text: "Téléphones et accessoires des vendeurs membres", img: "telephone", bg: "#1D4ED8", fg: "#fff", sub: "#DCE7FF", d1: "#2563EB", d2: "#60A5FA", tagBg: "#FFC93C", tagFg: "#0B1B3F", goBg: "#fff", goFg: "#1D4ED8", go: "Voir les offres", act: { cat: "Téléphones" } },
   { tag: "BEAUTÉ", title: "Prenez soin de vous.", text: "Parfums, soins et cosmétiques", img: "parfum", bg: "#D62839", fg: "#fff", sub: "#FFE4E7", d1: "#E8475A", d2: "#FFC93C", tagBg: "#fff", tagFg: "#D62839", goBg: "#0B1B3F", goFg: "#fff", go: "Je découvre", act: { cat: "Beauté" } },
-  { tag: "VOTRE PUB ICI", title: "Votre boutique mérite cette place.", text: "Gratuit pour les membres, sans commission", img: "blender", bg: "#FFC93C", fg: "#0B1B3F", sub: "#4A3A10", d1: "#FFD96B", d2: "#1D4ED8", tagBg: "#0B1B3F", tagFg: "#fff", goBg: "#1D4ED8", goFg: "#fff", go: "Ouvrir ma boutique", act: { shop: true } }
+  { tag: "VOTRE PUB ICI", title: "Votre boutique mérite cette place.", text: "Gratuit et sans commission, ouvert à tous", img: "blender", bg: "#FFC93C", fg: "#0B1B3F", sub: "#4A3A10", d1: "#FFD96B", d2: "#1D4ED8", tagBg: "#0B1B3F", tagFg: "#fff", goBg: "#1D4ED8", goFg: "#fff", go: "Ouvrir ma boutique", act: { shop: true } }
 ];
-const PROD_SEL = "*, shops(id,name,city,whatsapp,owner)";
+const PROD_SEL = "*, shops(id,name,city,whatsapp,owner,verified,status)";
 const fetchProducts = () => q(sb.from("products").select(PROD_SEL).eq("status", "online").order("created_at", { ascending: false }).limit(300));
 
 function runAct(a) {
   if (a.shop) openShop();
   else if (a.cat) { UI.jcat = a.cat; rerender(); setTimeout(() => { const el = document.getElementById("j-annonces"); if (el) el.scrollIntoView({ behavior: "smooth" }); }, 40); }
 }
-function openShop() { if (!isMember()) { openSheet("join", { what: "La vente sur Joyau" }); return; } push("shop"); }
+/* Vendre sur Joyau : ouvert à tous (compte vendeur), la boutique est validée par l'administrateur */
+function openShop() {
+  if (!S.session) { push("sellerAuth", { mode: "signup" }); return; }
+  if (!S.me) { push("sellerAuth", { mode: "profile" }); return; }
+  if (!canSell()) { if (isSeller()) toast("Votre compte vendeur est suspendu. Contactez Force Chrétienne."); else openSheet("join", { what: "La vente sur Joyau" }); return; }
+  push("shop");
+}
+function SellerBadge({ shop, light }) {
+  if (shop.verified) return html`<span class="row" style="gap:4px;display:inline-flex;align-items:center"><${Verified} s=${14} /><span>Membre vérifié Force Chrétienne</span></span>`;
+  return html`<span style=${light ? "" : "color:var(--j-muted)"}>Vendeur Joyau</span>`;
+}
+
+/* Compte vendeur Joyau (sans adhésion à Force Chrétienne) */
+function SellerAuth({ mode }) {
+  const draft = (() => { try { return JSON.parse(localStorage.getItem("fc-seller-draft") || "{}"); } catch (e) { return {}; } })();
+  const [m, setM] = useState(mode || "signup");
+  const [f, setF] = useState({ prenoms: draft.prenoms || "", nom: draft.nom || "", whatsapp: draft.whatsapp || "", ville: draft.ville || "", email: "", pw: "" });
+  const [err, setErr] = useState(""); const [busy, setBusy] = useState(false); const [check, setCheck] = useState(false);
+  const set = k => e => setF(Object.assign({}, f, { [k]: e.target.value }));
+  const finish = () => { UI.stack = UI.stack.filter(o => o.type !== "sellerAuth"); if (!JOYAU_MODE && !isMember()) { S.guest = true; UI.tab = "joyau"; } if (canSell()) push("shop"); else { if (isSeller()) toast("Votre compte vendeur est suspendu. Contactez Force Chrétienne."); refresh(); } };
+  const saveProfile = async userId => {
+    await q(sb.from("profiles").insert({ id: userId, account_type: "seller", nom: f.nom.trim().toUpperCase(), prenoms: f.prenoms.trim(), whatsapp: f.whatsapp.trim(), tel: f.whatsapp.trim(), ville: f.ville.trim() }));
+    try { localStorage.removeItem("fc-seller-draft"); } catch (e) {}
+    await loadMe();
+  };
+  const idOk = () => {
+    if (!f.prenoms.trim() || !f.nom.trim()) return "Indiquez votre nom et vos prénoms.";
+    if (f.whatsapp.replace(/\D/g, "").length < 8) return "Indiquez un numéro WhatsApp valide : les commandes arriveront sur ce numéro.";
+    return "";
+  };
+  const submit = async e => {
+    e.preventDefault(); setErr("");
+    if (m !== "login") { const x = idOk(); if (x) { setErr(x); return; } }
+    if (m !== "profile") {
+      if (!/^\S+@\S+\.\S+$/.test(f.email.trim())) { setErr("Saisissez une adresse e-mail valide."); return; }
+      if (m === "signup" && f.pw.length < 8) { setErr("Le mot de passe doit contenir au moins 8 caractères."); return; }
+      if (m === "login" && !f.pw) { setErr("Saisissez votre mot de passe."); return; }
+    }
+    setBusy(true);
+    try {
+      if (m === "signup") {
+        try { localStorage.setItem("fc-seller-draft", JSON.stringify({ prenoms: f.prenoms, nom: f.nom, whatsapp: f.whatsapp, ville: f.ville })); } catch (x) {}
+        const d = await q(sb.auth.signUp({ email: f.email.trim(), password: f.pw, options: { emailRedirectTo: location.origin + (JOYAU_MODE ? "/joyau" : "/") } }));
+        if (d.user && d.user.identities && d.user.identities.length === 0) setErr("Un compte existe déjà avec cet e-mail. Connectez-vous.");
+        else if (!d.session) setCheck(true);
+        else { S.session = d.session; await saveProfile(d.user.id); toast("Compte vendeur créé !"); finish(); }
+      } else if (m === "login") {
+        const d = await q(sb.auth.signInWithPassword({ email: f.email.trim(), password: f.pw }));
+        S.session = d.session; await loadMe();
+        if (!S.me) setM("profile"); else finish();
+      } else { await saveProfile(uid()); toast("Compte vendeur créé !"); finish(); }
+    } catch (x) { setErr(errText(x)); }
+    setBusy(false);
+  };
+  if (check) return html`<div class="overlay j-scope"><${OvHead} title="Vendre sur Joyau" /><div class="ov-body col" style="gap:14px;align-items:center;text-align:center">
+    <span style="width:90px;height:90px;border-radius:28px;background:#FFF7DD;display:flex;align-items:center;justify-content:center"><${Icon} n="mail" s=${44} c="#1F3FC4" /></span>
+    <h2 style="font-size:22px">Confirmez votre e-mail</h2>
+    <p class="muted" style="line-height:1.55">Nous avons envoyé un lien à <b style="color:var(--ink)">${f.email}</b>. Ouvrez-le, puis connectez-vous pour ouvrir votre boutique.</p>
+    <button class="btn btn-j btn-block" onClick=${() => { setCheck(false); setM("login"); }}>J'ai confirmé, me connecter</button></div></div>`;
+  return html`<div class="overlay j-scope"><${OvHead} title=${m === "login" ? "Espace vendeur" : "Vendre sur Joyau"} />
+    <form class="ov-body col" style="gap:14px" onSubmit=${submit}>
+      ${m === "signup" && html`<div style="background:#1D4ED8;color:#fff;border-radius:20px;padding:18px" class="col"><b style="font-family:var(--f-head);font-size:20px">Ouvrez votre boutique, c'est gratuit</b><span class="small" style="color:#DCE7FF;line-height:1.5">Créez votre compte vendeur, présentez votre boutique : l'administrateur la valide, puis vos produits sont publiés instantanément. Les commandes arrivent sur votre WhatsApp.</span></div>`}
+      ${m === "login" && html`<h2 style="font-size:22px">Heureux de vous revoir</h2><p class="small muted" style="margin-top:-8px">Vendeur Joyau ou membre de Force Chrétienne : connectez-vous avec votre compte.</p>`}
+      ${m === "profile" && html`<h2 style="font-size:22px">Vos informations de vendeur</h2>`}
+      ${m !== "login" && html`
+        <div class="row" style="gap:10px;align-items:flex-start"><span class="grow"><${Field} label="Prénoms" req><input id="sa-prenoms" class="input" value=${f.prenoms} onInput=${set("prenoms")} autocomplete="given-name" /><//></span><span class="grow"><${Field} label="Nom" req><input id="sa-nom" class="input" value=${f.nom} onInput=${set("nom")} autocomplete="family-name" /><//></span></div>
+        <${Field} label="Numéro WhatsApp" req hint="Les commandes des acheteurs arrivent sur ce numéro."><input id="sa-wa" class="input" type="tel" inputmode="tel" value=${f.whatsapp} onInput=${set("whatsapp")} placeholder="07 00 00 00 00" /><//>
+        <${Field} label="Ville ou quartier"><input id="sa-ville" class="input" value=${f.ville} onInput=${set("ville")} placeholder="Abidjan, Cocody" /><//>`}
+      ${m !== "profile" && html`
+        <${Field} label="E-mail" req><input id="sa-email" class="input" type="email" autocomplete="email" value=${f.email} onInput=${set("email")} placeholder="nom@exemple.com" /><//>
+        <${Field} label="Mot de passe" req hint=${m === "signup" ? "8 caractères minimum" : ""}><input id="sa-pw" class="input" type="password" autocomplete=${m === "signup" ? "new-password" : "current-password"} value=${f.pw} onInput=${set("pw")} /><//>`}
+      ${err && html`<span class="err-msg">${err}</span>`}
+      <${Busy} on=${busy} type="submit" cls="btn btn-j btn-block" style="height:54px">${m === "signup" ? "Créer mon compte vendeur" : m === "login" ? "Se connecter" : "Continuer"}<//>
+      ${m === "signup" && html`<p class="small muted center">Déjà un compte ? <button type="button" class="link" onClick=${() => { setM("login"); setErr(""); }}>Se connecter</button></p>`}
+      ${m === "login" && html`<p class="small muted center">Pas encore de compte ? <button type="button" class="link" onClick=${() => { setM("signup"); setErr(""); }}>Créer mon compte vendeur</button></p>`}
+      ${m !== "profile" && html`<p class="tiny muted center" style="line-height:1.5">Membre d'une église ? Vous pouvez aussi <button type="button" class="link" style="font-size:inherit" onClick=${() => { if (JOYAU_MODE) { goFC("signup"); return; } UI.stack = []; S.guest = false; UI.start = "signup"; rerender(); }}>rejoindre Force Chrétienne</button> pour obtenir le badge Membre vérifié.</p>`}
+    </form></div>`;
+}
+
+/* Signaler une annonce ou une boutique */
+function ReportSheet({ product_id, shop_id, name }) {
+  const REASONS = ["Arnaque ou fraude", "Produit interdit ou dangereux", "Contenu choquant", "Fausses informations", "Autre"];
+  const [r, setR] = useState(""); const [t, setT] = useState(""); const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const send = async () => {
+    if (!r) { setErr("Choisissez un motif."); return; }
+    if (r === "Autre" && t.trim().length < 3) { setErr("Précisez le problème en quelques mots."); return; }
+    setBusy(true);
+    try { await q(sb.from("reports").insert({ product_id: product_id || null, shop_id: shop_id || null, reporter: S.me ? uid() : null, reason: (r + (t.trim() ? " : " + t.trim() : "")).slice(0, 500) })); UI.sheet = null; toast("Merci : l'administrateur va examiner ce signalement."); }
+    catch (x) { setErr(errText(x)); }
+    setBusy(false);
+  };
+  return html`<${Sheet}><div class="col j-scope" style="gap:12px">
+    <h2 style="font-size:19px">Signaler ${product_id ? "cette annonce" : "cette boutique"}</h2>
+    <p class="small muted" style="margin-top:-6px">« ${name} » · Votre signalement est anonyme pour le vendeur.</p>
+    <div class="row" style="flex-wrap:wrap;gap:8px">${REASONS.map(x => html`<button key=${x} class=${"opt" + (x === r ? " on" : "")} onClick=${() => { setR(x); setErr(""); }}>${x}</button>`)}</div>
+    <textarea id="rp-text" class="input" style="min-height:80px" maxlength="400" value=${t} onInput=${e => setT(e.target.value)} placeholder="Précisions (facultatif)"></textarea>
+    ${err && html`<span class="err-msg">${err}</span>`}
+    <${Busy} on=${busy} cls="btn btn-block" style="background:#D62839;color:#fff" onClick=${send}>Envoyer le signalement<//>
+    <button class="btn btn-ghost btn-block" onClick=${closeSheet}>Annuler</button>
+  </div><//>`;
+}
 
 function Slider({ slides, sponso }) {
   const [i, setI] = useState(0);
@@ -122,7 +222,7 @@ function JoyauTab() {
       <div class="chips">${CATS.map(c => html`<button key=${c} class=${"chip" + (c === cat ? " on" : "")} onClick=${() => setCat(c)}>${catIcon(c)}${c === "Services" ? "Prestations de services" : c}</button>`)}</div>
       ${!searching && html`
         <${Slider} slides=${HERO} />
-        ${!S.session && html`<div class="row" style="margin-top:12px;padding:12px 14px;border-radius:16px;background:#FFF7DD"><${Shield} s=${30} /><span class="grow small" style="line-height:1.45"><b>Vous êtes membre d'une église ?</b> Rejoignez Force Chrétienne pour vendre et réseauter.</span><button class="btn btn-sm" style="background:#0B1B3F;color:#fff" onClick=${() => { if (JOYAU_MODE) { goFC("signup"); return; } S.guest = false; UI.start = "signup"; rerender(); }}>Rejoindre</button></div>`}
+        ${!S.session && html`<div class="row" style="margin-top:12px;padding:12px 14px;border-radius:16px;background:#FFF7DD"><${Shield} s=${30} /><span class="grow small" style="line-height:1.45"><b>Vous êtes membre d'une église ?</b> Rejoignez Force Chrétienne pour réseauter et obtenir le badge Membre vérifié.</span><button class="btn btn-sm" style="background:#0B1B3F;color:#fff" onClick=${() => { if (JOYAU_MODE) { goFC("signup"); return; } S.guest = false; UI.start = "signup"; rerender(); }}>Rejoindre</button></div>`}
         <div class="section-title"><h2>Explorer les univers</h2></div>
         <div class="bento">
           <button style="background:#D62839;color:#fff" onClick=${() => setCat("Gastronomie")}><strong>Gastronomie</strong><span class="s">Plats, jus, pâtisseries</span><img src=${IMG.attieke} alt="" /></button>
@@ -135,7 +235,7 @@ function JoyauTab() {
       ${searching && html`<button class="link" style="margin:-6px 0 12px" onClick=${() => { UI.jcat = "Tout"; UI.jq = ""; rerender(); }}>← Revenir à l'accueil Joyau</button>`}
       ${prods.loading && !prods.data && html`<${Loading} />`}
       <div class="pgrid">${list.map(p => html`<${ProductCard} key=${p.id} p=${p} />`)}</div>
-      ${!prods.loading && !list.length && html`<${Empty} icon="store" title=${online.length ? "Aucune annonce trouvée" : "Les premières boutiques ouvrent bientôt"} text=${online.length ? "Essayez un autre mot ou une autre catégorie." : "Membre de Force Chrétienne ? Ouvrez votre boutique gratuitement et soyez parmi les premiers vendeurs."}>${!online.length && html`<button class="btn btn-j btn-sm" onClick=${openShop}>Ouvrir ma boutique</button>`}<//>`}
+      ${!prods.loading && !list.length && html`<${Empty} icon="store" title=${online.length ? "Aucune annonce trouvée" : "Les premières boutiques ouvrent bientôt"} text=${online.length ? "Essayez un autre mot ou une autre catégorie." : "Ouvrez votre boutique gratuitement et soyez parmi les premiers vendeurs."}>${!online.length && html`<button class="btn btn-j btn-sm" onClick=${openShop}>Ouvrir ma boutique</button>`}<//>`}
       ${!searching && html`
         <div style="margin-top:26px"><${Slider} slides=${ADS2} sponso /></div>
         <div class="section-title"><h2>Acheter en 3 gestes</h2></div>
@@ -152,7 +252,7 @@ function JoyauTab() {
         <div style="margin-top:26px;background:#1D4ED8;color:#fff;border-radius:24px;padding:24px 20px;position:relative;overflow:hidden" class="col">
           <span style="position:absolute;right:-60px;top:-90px;width:220px;height:220px;border-radius:999px;border:36px solid #2563EB"></span>
           <h2 style="position:relative;font-size:25px;line-height:1.05">Vous vendez ?<br />Joyau vous amène les clients.</h2>
-          <p style="position:relative;color:#DCE7FF;font-size:14px;line-height:1.5">Boutique gratuite pour les membres de Force Chrétienne. Les commandes arrivent sur votre WhatsApp.</p>
+          <p style="position:relative;color:#DCE7FF;font-size:14px;line-height:1.5">Boutique gratuite et sans commission, ouverte à tous. Les commandes arrivent sur votre WhatsApp.</p>
           <button class="btn btn-jy" style="position:relative;align-self:flex-start" onClick=${openShop}>${myShop.data ? "Gérer ma boutique" : "Créer ma boutique"}</button>
         </div>`}
       ${JOYAU_MODE && html`<a href="/" class="row" style="margin-top:22px;padding:14px;border-radius:18px;background:var(--soft);text-decoration:none;color:var(--ink)"><${Shield} s=${34} /><span class="grow small" style="line-height:1.45">Joyau est la boutique de <b>Force Chrétienne</b>, le réseau des professionnels chrétiens.</span><${Icon} n="arrow" s=${18} /></a>`}
@@ -181,9 +281,10 @@ function Product({ id }) {
     <${OvHead} title=${shop.name || "Joyau"} right=${html`<button class="icon-btn" style="background:var(--j-soft)" aria-label="Partager ce produit" onClick=${() => shareLink(p.name, p.name + " à " + fmt(p.price) + " sur Joyau", location.origin + "/joyau?p=" + p.id)}><${Icon} n="share" s=${19} c="#0B1B3F" /></button><button class="icon-btn" style="background:var(--j-soft)" aria-label=${fav ? "Retirer des favoris" : "Ajouter aux favoris"} onClick=${() => toggleFav(p.id)}><${Icon} n="heart" s=${20} c=${fav ? "#D62839" : "#0B1B3F"} fill=${fav ? "#D62839" : "none"} /></button>`} />
     <div style="aspect-ratio:1/1;max-height:420px;width:100%;background:var(--j-soft);overflow:hidden"><img src=${p.photo_url} alt=${p.name} style="width:100%;height:100%;object-fit:cover;display:block" /></div>
     <div class="ov-body col" style="gap:16px">
+      ${p.owner === uid() && shop.status && shop.status !== "active" && html`<div class="demo-note" style="background:var(--warn-soft);color:var(--warn)">${shop.status === "pending" ? "Votre boutique est en attente de validation : cette annonce sera visible par les acheteurs dès qu'elle sera validée." : "Votre boutique est suspendue : cette annonce n'est pas visible."}</div>`}
       ${p.status !== "online" && html`<div class="demo-note" style="background:var(--warn-soft);color:var(--warn)">${p.status === "hidden_admin" ? "Annonce masquée par l'administrateur." : "Annonce masquée : seuls vous la voyez."}</div>`}
       <div class="col" style="gap:6px"><span class="pill pill-j" style="align-self:flex-start">${p.cat === "Services" ? "Prestation de service" : p.cat}</span><h1 style="font-size:23px;line-height:1.15">${p.name}</h1><b style="font-family:var(--f-head);font-size:26px">${fmt(p.price)}</b></div>
-      <button class="card row" style="text-align:left;border-color:var(--j-line)" onClick=${() => push("seller", { id: p.shop_id })}><span class="logo-sq" style="background:#1D4ED8">${initials(shop.name)}</span><span class="grow"><b>${shop.name}</b><${Verified} s=${14} /><br /><span class="small" style="color:var(--j-muted)">Membre Force Chrétienne · ${shop.city}</span></span><${Icon} n="arrow" s=${18} /></button>
+      <button class="card row" style="text-align:left;border-color:var(--j-line)" onClick=${() => push("seller", { id: p.shop_id })}><span class="logo-sq" style="background:#1D4ED8">${initials(shop.name)}</span><span class="grow"><b>${shop.name}</b><br /><span class="small" style="color:var(--j-muted)"><${SellerBadge} shop=${shop} /> · ${shop.city}</span></span><${Icon} n="arrow" s=${18} /></button>
       ${p.description && html`<p style="line-height:1.6;color:#33405C;white-space:pre-wrap">${p.description}</p>`}
       ${opts.length > 0 && html`<div class="col" style="gap:8px"><b>${p.opt_label || "Option"} : <span style="font-weight:500">${opts[o]}</span></b><div class="row" style="flex-wrap:wrap;gap:8px">${opts.map((x, k) => html`<button key=${x} class=${"opt" + (k === o ? " on" : "")} onClick=${() => setO(k)}>${x}</button>`)}</div></div>`}
       ${sizes.length > 0 && html`<div class="col" style="gap:8px"><b>${p.size_label || "Taille"} : <span style="font-weight:500">${sizes[s]}</span></b><div class="row" style="flex-wrap:wrap;gap:8px">${sizes.map((x, k) => html`<button key=${x} class=${"opt" + (k === s ? " on" : "")} onClick=${() => setS(k)}>${x}</button>`)}</div></div>`}
@@ -192,6 +293,7 @@ function Product({ id }) {
       <p class="center small" style="color:var(--j-muted);margin-top:-8px">Paiement et livraison à convenir directement avec le vendeur.</p>
       <button class="btn btn-line btn-block" style="border-color:var(--j-line);color:#1D4ED8" onClick=${() => shareLink(p.name, p.name + " à " + fmt(p.price) + " sur Joyau", location.origin + "/joyau?p=" + p.id)}><${Icon} n="share" s=${18} />Partager ce produit</button>
       ${others.length > 0 && html`<div><div class="section-title" style="margin-top:8px"><h2 style="font-size:18px">Du même vendeur</h2></div><div class="pgrid">${others.map(x => html`<${ProductCard} key=${x.id} p=${x} />`)}</div></div>`}
+      ${p.owner !== uid() && html`<button class="link" style="align-self:center;color:#B91C1C;font-size:13.5px" onClick=${() => openSheet("report", { product_id: p.id, shop_id: p.shop_id, name: p.name })}><${Icon} n="flag" s=${15} c="#B91C1C" />Signaler cette annonce</button>`}
     </div>
   </div>`;
 }
@@ -214,13 +316,14 @@ function Seller({ id }) {
     <div style="background:#1D4ED8;color:#fff;padding:22px 16px;position:relative;overflow:hidden" class="row">
       <span style="position:absolute;right:-50px;top:-70px;width:180px;height:180px;border-radius:999px;border:30px solid #2563EB"></span>
       <span class="logo-sq" style="position:relative;width:64px;height:64px;font-size:22px;background:#FFC93C;color:#0B1B3F">${initials(s.name)}</span>
-      <span class="grow" style="position:relative"><h1 style="font-size:22px">${s.name || "…"}</h1><span class="small" style="color:#DCE7FF">${s.city || ""} · ${list.length} annonce${list.length > 1 ? "s" : ""}</span></span>
+      <span class="grow" style="position:relative"><h1 style="font-size:22px">${s.name || "…"}</h1><span class="small" style="color:#DCE7FF">${s.city || ""} · ${list.length} annonce${list.length > 1 ? "s" : ""}</span>${s.id && html`<br /><span class="small" style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;background:${s.verified ? "#FFC93C" : "rgba(255,255,255,.16)"};color:${s.verified ? "#0B1B3F" : "#fff"};font-weight:700"><${SellerBadge} shop=${s} light /></span>`}</span>
     </div>
     <div class="ov-body">
       ${s.description && html`<p style="line-height:1.6;color:#33405C;margin-bottom:16px">${s.description}</p>`}
       ${s.owner && isMember() && s.owner !== uid() && html`<button class="btn btn-line btn-block" style="margin-bottom:16px" onClick=${() => push("profile", { id: s.owner })}>Voir le profil du vendeur</button>`}
       <div class="pgrid">${list.map(p => html`<${ProductCard} key=${p.id} p=${p} />`)}</div>
       ${!prods.loading && !list.length && html`<${Empty} icon="store" title="Aucune annonce en ligne" />`}
+      ${s.id && s.owner !== uid() && html`<div class="center" style="margin-top:18px"><button class="link" style="color:#B91C1C;font-size:13.5px" onClick=${() => openSheet("report", { shop_id: s.id, name: s.name })}><${Icon} n="flag" s=${15} c="#B91C1C" />Signaler cette boutique</button></div>`}
     </div>
   </div>`;
 }
@@ -244,6 +347,9 @@ function Shop() {
     <${OvHead} title="Ma boutique Joyau" right=${html`<button class="icon-btn" style="background:var(--j-soft)" aria-label="Modifier la boutique" onClick=${() => push("shopEdit")}><${Icon} n="edit" s=${19} /></button>`} />
     <div style="background:#FFC93C;padding:18px 16px" class="row"><span class="logo-sq" style="width:58px;height:58px;background:#1D4ED8;font-size:20px">${initials(s.name)}</span><span class="grow"><h2 style="font-size:21px">${s.name}</h2><span class="small" style="color:#4A3A10">${s.city} · WhatsApp ${s.whatsapp}</span></span></div>
     <div class="ov-body col" style="gap:16px">
+      ${s.status === "pending" && html`<div class="demo-note" style="background:var(--warn-soft);color:var(--warn);line-height:1.5"><b>Boutique en attente de validation.</b> L'administrateur vérifie votre boutique. Ajoutez déjà vos produits : ils seront visibles par les acheteurs dès la validation, et vous serez prévenu.</div>`}
+      ${s.status === "suspended" && html`<div class="demo-note" style="background:var(--danger-soft);color:var(--danger);line-height:1.5"><b>Boutique suspendue</b> par l'administrateur : vos annonces ne sont plus visibles sur Joyau. Contactez Force Chrétienne pour en savoir plus.</div>`}
+      ${(s.status === "pending" || isSeller()) && html`<${PushCard} compact title="Soyez prévenu sur ce téléphone" text="Validation de votre boutique et nouvelles de Joyau : recevez une notification, même application fermée." />`}
       <div class="row" style="gap:8px"><div class="stat"><b>${list.filter(p => p.status === "online").length}</b><span>en ligne</span></div><div class="stat"><b>${views}</b><span>vues</span></div><div class="stat"><b>${clicks}</b><span>commandes WhatsApp</span></div></div>
       <button class="btn btn-j btn-block" onClick=${() => push("productForm", { shop: s })}><${Icon} n="plus" s=${19} w=${2.6} />Ajouter un produit ou un service</button>
       <button class="btn btn-line btn-block" onClick=${() => push("seller", { id: s.id })}><${Icon} n="eye" s=${18} />Voir ma boutique comme un acheteur</button>
@@ -257,7 +363,9 @@ function Shop() {
             <button class="link" style="font-size:13px" onClick=${() => push("productForm", { shop: s, edit: p })}>Modifier</button>
             <button class="link" style="font-size:13px;color:#B91C1C" onClick=${() => openSheet("confirm", { title: "Supprimer cette annonce ?", text: "« " + p.name + " » sera retirée de Joyau. Cette action est définitive.", ok: "Supprimer", fn: async () => { await q(sb.from("products").delete().eq("id", p.id)); toast("Annonce supprimée."); } })}>Supprimer</button></span></span>
       </div>`)}
-      ${!mine.loading && !list.length && html`<${Empty} icon="store" title="Votre boutique est vide" text="Ajoutez votre premier produit ou service : il sera visible par tous les acheteurs de Joyau." />`}
+      ${!mine.loading && !list.length && html`<${Empty} icon="store" title="Votre boutique est vide" text=${s.status === "active" ? "Ajoutez votre premier produit ou service : il sera visible par tous les acheteurs de Joyau." : "Ajoutez votre premier produit ou service : il sera visible dès la validation de votre boutique."} />`}
+      ${isSeller() && html`<div class="row" style="padding:14px;border-radius:18px;background:#FFF7DD;align-items:flex-start"><${Shield} s=${32} /><span class="grow small" style="line-height:1.5"><b>Vous êtes membre d'une église ?</b> Rejoignez Force Chrétienne : réseau professionnel, opportunités et badge <b>Membre vérifié</b> sur votre boutique.<br /><button class="link" style="margin-top:6px" onClick=${startUpgrade}>Rejoindre Force Chrétienne</button></span></div>`}
+      ${(isSeller() || JOYAU_MODE) && html`<button class="link" style="align-self:center;margin-top:4px" onClick=${async () => { await signOut(); if (!JOYAU_MODE) { S.guest = true; UI.tab = "joyau"; rerender(); } }}>Se déconnecter</button>`}
     </div>
   </div>`;
 }
@@ -275,13 +383,13 @@ function ShopForm({ edit }) {
       if (cur) await q(sb.from("shops").update(row).eq("id", cur.id)); else await q(sb.from("shops").insert(Object.assign({ owner: uid() }, row)));
       delete CACHE["my-shop"];
       if (cur) back();
-      refresh(); toast(cur ? "Boutique mise à jour." : "Votre boutique est ouverte !");
+      refresh(); toast(cur ? "Boutique mise à jour." : isAdmin() ? "Votre boutique est ouverte !" : "Boutique créée ! Elle sera visible après validation par l'administrateur.");
     } catch (e) { fail(e); }
     setBusy(false);
   };
   return html`<div class="overlay j-scope"><${OvHead} title=${cur ? "Modifier ma boutique" : "Ouvrir ma boutique"} />
     <div class="ov-body col" style="gap:14px">
-      ${!cur && html`<div style="background:#1D4ED8;color:#fff;border-radius:20px;padding:18px" class="col"><b style="font-family:var(--f-head);font-size:20px">Gratuit, sans commission</b><span class="small" style="color:#DCE7FF;line-height:1.5">Vos produits sont vus par tous les acheteurs de Joyau. Les commandes arrivent directement sur votre WhatsApp.</span></div>`}
+      ${!cur && html`<div style="background:#1D4ED8;color:#fff;border-radius:20px;padding:18px" class="col"><b style="font-family:var(--f-head);font-size:20px">Gratuit, sans commission</b><span class="small" style="color:#DCE7FF;line-height:1.5">L'administrateur valide votre boutique une seule fois, puis chaque produit que vous ajoutez est publié instantanément. Les commandes arrivent directement sur votre WhatsApp.</span></div>`}
       <${Field} label="Nom de la boutique" req><input id="sh-name" class="input" value=${f.name} onInput=${set("name")} placeholder="Ex. Les Délices de Rose" /><//>
       <${Field} label="Numéro WhatsApp" req hint="Les acheteurs vous écrivent sur ce numéro. Format : 07 00 00 00 00 ou avec l'indicatif."><input id="sh-wa" class="input" inputmode="tel" value=${f.whatsapp} onInput=${set("whatsapp")} placeholder="07 00 00 00 00" /><//>
       <${Field} label="Ville ou quartier"><input id="sh-city" class="input" value=${f.city} onInput=${set("city")} placeholder="Cocody" /><//>
@@ -307,7 +415,7 @@ function ProductForm({ shop, edit }) {
       const row = { name: f.name.trim(), cat: f.cat, price, description: f.description.trim(), photo_url, opt_label: opts.length ? (f.opt_label.trim() || "Option") : "", opts, size_label: sizes.length ? (f.size_label.trim() || "Taille") : "", sizes };
       if (edit) await q(sb.from("products").update(row).eq("id", edit.id));
       else await q(sb.from("products").insert(Object.assign({ shop_id: shop.id, owner: uid() }, row)));
-      back(); refresh(); toast(edit ? "Annonce mise à jour." : "Produit en ligne sur Joyau.");
+      back(); refresh(); toast(edit ? "Annonce mise à jour." : shop.status && shop.status !== "active" ? "Produit enregistré : il sera visible dès la validation de votre boutique." : "Produit en ligne sur Joyau.");
     } catch (x) { fail(x); }
     setBusy(false);
   };

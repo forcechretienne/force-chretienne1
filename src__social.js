@@ -120,7 +120,7 @@ function Compose({ kind: k0 }) {
 
 /* ---------- Réseau ---------- */
 const fetchConns = () => q(sb.from("connections").select("*").or("requester.eq." + uid() + ",addressee.eq." + uid()));
-const fetchMembers = () => q(sb.from("profiles").select(PROFILE_COLS + ",secteur").eq("status", "active").neq("id", uid()).order("created_at", { ascending: false }).limit(1000));
+const fetchMembers = () => q(sb.from("profiles").select(PROFILE_COLS + ",secteur").eq("status", "active").eq("account_type", "member").neq("id", uid()).order("created_at", { ascending: false }).limit(1000));
 function connState(conns, id) {
   const c = (conns || []).find(x => (x.requester === id && x.addressee === uid()) || (x.addressee === id && x.requester === uid()));
   if (!c) return { st: "none" };
@@ -294,7 +294,7 @@ function Notifs() {
   const n = useData("notifs", () => q(sb.from("notifications").select("*").eq("user_id", uid()).order("created_at", { ascending: false }).limit(80)));
   useEffect(() => () => { sb.from("notifications").update({ read: true }).eq("user_id", uid()).eq("read", false).then(() => { delete CACHE.unread; refresh(); }); }, []);
   const ic = { admin: "shield", person: "users", joyau: "store", comment: "comment", job: "brief", like: "like" };
-  const open = x => { const l = x.link || ""; if (l.startsWith("profile:")) push("profile", { id: l.slice(8) }); else if (l === "network") go("network"); else if (l === "opps") { UI.opp = "jobs"; go("opps"); } else if (l === "home") go("home"); else if (l === "admin" && isAdmin()) { UI.stack = []; push("admin"); } };
+  const open = x => { const l = x.link || ""; if (l.startsWith("profile:")) push("profile", { id: l.slice(8) }); else if (l === "network") go("network"); else if (l === "opps") { UI.opp = "jobs"; go("opps"); } else if (l === "home") go("home"); else if (l === "admin" && isAdmin()) { UI.stack = []; push("admin"); } else if (l === "shop") { UI.stack = []; push("shop"); } };
   return html`<div class="overlay">
     <${OvHead} title="Notifications" right=${html`<button class="link" onClick=${async () => { await sb.from("notifications").update({ read: true }).eq("user_id", uid()); delete CACHE.unread; refresh(); }}>Tout lu</button>`} />
     <div class="ov-body" style="padding-top:4px">

@@ -16,6 +16,13 @@ Application web mobile (PWA) : Force Chrétienne (réseau social des professionn
 - Tables `push_subscriptions` (appareils), `push_queue` (file d'envoi), `push_secrets` (clés VAPID créées automatiquement au premier appel). Déclencheurs : notifications, messages, j'aime, demandes à valider pour les admins.
 - Liens d'ouverture : `/?open=notifs|admin|network|home|opps|chat:<id>|profile:<id>`.
 
+## Joyau ouvert à tous (vendeurs)
+- N'importe qui peut créer un compte vendeur Joyau (bouton « Vendre ») sans adhérer à Force Chrétienne : profiles.account_type = 'seller'.
+- Chaque nouvelle boutique est « en attente » (shops.status = pending) : l'administrateur la valide une seule fois (Espace admin → Boutiques). Ensuite chaque produit est publié instantanément.
+- Badge « Membre vérifié Force Chrétienne » (shops.verified) si le propriétaire est membre validé ; sinon « Vendeur Joyau ».
+- Bouton « Signaler » sur les annonces et boutiques (table reports) ; l'admin peut suspendre une boutique.
+- Un vendeur peut demander à rejoindre Force Chrétienne depuis sa boutique (carte de membre, validation admin).
+
 ## Fichiers
 - **Sources à modifier** : `src__core.js` (socle, cache, icônes, composants), `src__auth.js` (comptes, inscription, adhésion), `src__social.js` (fil, réseau, profils, messagerie, notifications), `src__opps.js` (emplois, services, affaires), `src__joyau.js` (marketplace, boutiques), `src__main.js` (profil, admin, navigation, installation), `src__app.css` (styles), `tpl__index.html`, `tpl__joyau.html`, `tpl__sw.js`, `img__*.svg` (illustrations).
 - **Fichiers générés** (ne pas modifier à la main) : `app.js`, `app.css`, `index.html`, `joyau.html`, `sw.js` → produits par `python3 build.py`.

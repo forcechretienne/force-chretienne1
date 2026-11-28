@@ -27,6 +27,7 @@ function openFromUrl(search) {
   if (pId || sId || start) {
     try { history.replaceState(null, "", location.pathname); } catch (e) {}
     if (start === "signup" || start === "login") { if (!S.session) UI.start = start; }
+    else if (start === "upgrade") { if (isSeller()) UI.start = "upgrade"; }
     else if (pId) { if (!JOYAU_MODE) { S.guest = S.guest || !isMember(); UI.tab = "joyau"; } UI.stack = []; push("product", { id: pId }); }
     else if (sId) { if (!JOYAU_MODE) { S.guest = S.guest || !isMember(); UI.tab = "joyau"; } UI.stack = []; push("seller", { id: sId }); }
     refresh(); return;
@@ -35,6 +36,7 @@ function openFromUrl(search) {
   if (!v) return;
   try { history.replaceState(null, "", location.pathname); } catch (e) {}
   for (const k in CACHE) delete CACHE[k];
+  if (v === "shop" && S.me) { UI.stack = []; if (!JOYAU_MODE && !isMember()) { S.guest = true; UI.tab = "joyau"; } push("shop"); refresh(); return; }
   if (!isMember()) { refresh(); return; }
   if (v === "notifs") { UI.stack = []; push("notifs"); }
   else if (v === "admin") { UI.stack = []; if (isAdmin()) push("admin"); }
@@ -178,7 +180,7 @@ function Signup() {
 }
 
 /* Étapes 2 à 4 : profil, église et carte de membre (compte déjà créé) */
-function ProfileSetup({ redo }) {
+function ProfileSetup({ redo, upgrade }) {
   const me = S.me || {};
   const [step, setStep] = useState(redo ? 1 : 0);
   const [f, setF] = useState({ nom: me.nom || "", prenoms: me.prenoms || "", naissance: me.naissance || "", profession: me.profession || "", entreprise: me.entreprise || "", eglise: me.eglise || "", assemblee: me.assemblee || "", ville: me.ville || "", tel: me.tel || "", whatsapp: me.whatsapp || "", accept: !!redo });
@@ -212,20 +214,21 @@ function ProfileSetup({ redo }) {
       let carte_path = me.carte_path || "", carte_verso_path = me.carte_verso_path || "";
       if (carteMode === "pdf" && pdf) { carte_path = await uploadRaw("cards", pdf, "carte", "pdf", "application/pdf"); carte_verso_path = ""; }
       else if (carte && verso) { carte_path = await uploadFile("cards", carte, "carte-recto"); carte_verso_path = await uploadFile("cards", verso, "carte-verso"); }
-      const row = { id: uid(), nom: f.nom.trim().toUpperCase(), prenoms: f.prenoms.trim(), naissance: f.naissance || null, profession: f.profession.trim(), entreprise: f.entreprise.trim(), eglise: f.eglise.trim(), assemblee: f.assemblee.trim(), ville: f.ville.trim(), tel: f.tel.trim(), whatsapp: f.whatsapp.trim(), mail: S.session.user.email, photo_url, carte_path, carte_verso_path };
+      const row = { id: uid(), account_type: "member", nom: f.nom.trim().toUpperCase(), prenoms: f.prenoms.trim(), naissance: f.naissance || null, profession: f.profession.trim(), entreprise: f.entreprise.trim(), eglise: f.eglise.trim(), assemblee: f.assemblee.trim(), ville: f.ville.trim(), tel: f.tel.trim(), whatsapp: f.whatsapp.trim(), mail: S.session.user.email, photo_url, carte_path, carte_verso_path };
       if (S.me) await q(sb.from("profiles").update(row).eq("id", uid()));
       else await q(sb.from("profiles").insert(row));
-      await loadMe(); refresh();
+      await loadMe(); UI.start = ""; S.guest = false; refresh();
       toast(isMember() ? "Bienvenue !" : "Candidature envoyée.");
     } catch (x) { fail(x); }
     setBusy(false);
   };
   const titles = ["Qui êtes-vous ?", "Votre vie pro et votre église", "Vos coordonnées"];
   return html`<div class="welcome">
-    <div class="ov-head"><button class="icon-btn" aria-label=${step ? "Étape précédente" : "Se déconnecter"} onClick=${() => { if (step > (redo ? 1 : 0)) setStep(step - 1); else signOut(); }}><${Icon} n=${step > (redo ? 1 : 0) ? "back" : "logout"} /></button><h1>${redo ? "Mettre à jour mon adhésion" : "Mon profil · étape " + (step + 2) + " sur 4"}</h1></div>
+    <div class="ov-head"><button class="icon-btn" aria-label=${step ? "Étape précédente" : "Se déconnecter"} onClick=${() => { if (step > (redo ? 1 : 0)) setStep(step - 1); else if (upgrade) { UI.start = ""; S.guest = true; UI.tab = "joyau"; rerender(); } else signOut(); }}><${Icon} n=${step > (redo ? 1 : 0) ? "back" : upgrade ? "close" : "logout"} /></button><h1>${redo ? "Mettre à jour mon adhésion" : upgrade ? "Rejoindre Force Chrétienne · " + (step + 1) + "/3" : "Mon profil · étape " + (step + 2) + " sur 4"}</h1></div>
     <div class="col" style="padding:16px 20px 36px;gap:16px">
       <div class="progress"><span class="on"></span>${[0, 1, 2].map(i => html`<span key=${i} class=${i <= step ? "on" : ""}></span>`)}</div>
       <h2 style="font-size:25px">${titles[step]}</h2>
+      ${upgrade && step === 0 && html`<div class="demo-note" style="background:var(--gold-soft);color:#5B4612">Votre boutique Joyau reste ouverte. Après validation de votre carte de membre, vous accéderez au réseau et vos produits porteront le badge <b>Membre vérifié</b>.</div>`}
       ${step === 0 && html`
         <${Field} label="Nom" req err=${errs.nom}><input id="pf-nom" class=${"input" + (errs.nom ? " err" : "")} value=${f.nom} onInput=${set("nom")} placeholder="KOUADIO" autocomplete="family-name" /><//>
         <${Field} label="Prénoms" req err=${errs.prenoms}><input id="pf-prenoms" class=${"input" + (errs.prenoms ? " err" : "")} value=${f.prenoms} onInput=${set("prenoms")} placeholder="Ulrich Emmanuel" autocomplete="given-name" /><//>

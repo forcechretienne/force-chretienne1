@@ -701,5 +701,206 @@ create trigger trg_job_pending after insert or update on public.jobs
 for each row execute function public.on_job_pending();
 
 
+-- ---------------------------------------------------------------------
+-- 14. Joyau ouvert à tous : comptes vendeurs, validation des boutiques, signalements
+-- ---------------------------------------------------------------------
+-- Type de compte : membre Force Chrétienne ou simple vendeur Joyau
+alter table public.profiles add column if not exists account_type text not null default 'member';
+do $$ begin
+  alter table public.profiles add constraint profiles_account_type_chk check (account_type in ('member','seller'));
+exception when duplicate_object then null; end $$;
+alter table public.profiles alter column profession drop not null, alter column eglise drop not null, alter column assemblee drop not null;
+alter table public.profiles alter column profession set default '', alter column eglise set default '', alter column assemblee set default '';
+
+-- Seuls les membres validés de Force Chrétienne accèdent au réseau
+create or replace function public.is_active() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.profiles where id = auth.uid() and status = 'active' and account_type = 'member');
+$$;
+-- Peut vendre sur Joyau : tout compte non refusé (la boutique est ensuite validée par l'admin)
+create or replace function public.can_sell() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.profiles where id = auth.uid() and status in ('active','pending'));
+$$;
+
+create or replace function public.profiles_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v_email text;
+begin
+  if tg_op = 'INSERT' then
+    if new.id <> auth.uid() and not public.is_admin() then raise exception 'Action non autorisée'; end if;
+    select email into v_email from auth.users where id = new.id;
+    if exists (select 1 from public.admin_emails a where lower(a.email) = lower(v_email)) then
+      new.role := 'admin'; new.status := 'active'; new.account_type := 'member';
+    elsif coalesce(new.account_type, 'member') = 'seller' then
+      new.role := 'member'; new.status := 'active'; new.account_type := 'seller';
+    else
+      new.role := 'member'; new.status := 'pending'; new.account_type := 'member';
+    end if;
+    if coalesce(new.mail, '') = '' then new.mail := coalesce(v_email, ''); end if;
+  elsif tg_op = 'UPDATE' then
+    if not public.is_admin() then
+      new.role := old.role;
+      if old.account_type = 'seller' and new.account_type = 'member' then
+        new.status := 'pending';            -- un vendeur demande à rejoindre le réseau
+      else
+        new.account_type := old.account_type;
+        new.status := case when old.status = 'refused' and old.account_type = 'member' then 'pending' else old.status end;
+      end if;
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop policy if exists "profils lisibles" on public.profiles;
+create policy "profils lisibles" on public.profiles for select
+  using (id = auth.uid() or public.is_admin() or (status = 'active' and account_type = 'member' and public.is_active()));
+
+-- Boutiques : validation par l'administrateur, badge « membre vérifié »
+-- Les boutiques déjà ouvertes restent visibles (une seule fois, à l'ajout de la colonne)
+do $$ begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'shops' and column_name = 'status') then
+    alter table public.shops add column status text not null default 'pending';
+    update public.shops set status = 'active';
+  end if;
+end $$;
+alter table public.shops add column if not exists verified boolean not null default false;
+do $$ begin
+  alter table public.shops add constraint shops_status_chk check (status in ('pending','active','suspended'));
+exception when duplicate_object then null; end $$;
+
+create or replace function public.shops_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  new.verified := exists (select 1 from public.profiles p where p.id = new.owner and p.status = 'active' and p.account_type = 'member');
+  if not public.is_admin() then
+    if tg_op = 'INSERT' then new.status := 'pending';
+    else new.status := old.status; end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_shops_guard on public.shops;
+create trigger trg_shops_guard before insert or update on public.shops
+for each row execute function public.shops_guard();
+
+create or replace function public.on_shop_status() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.status = 'pending' then
+      perform public.notify_admins('Nouvelle boutique Joyau à valider : « ' || new.name || ' » (' || coalesce(new.city, '') || ').');
+    end if;
+  elsif new.status <> old.status then
+    if new.status = 'active' then
+      perform public.notify(new.owner, 'joyau', 'Votre boutique « ' || new.name || ' » est validée : vos produits sont maintenant visibles sur Joyau.', 'shop');
+    elsif new.status = 'suspended' then
+      perform public.notify(new.owner, 'joyau', 'Votre boutique « ' || new.name || ' » a été suspendue par l''administrateur. Contactez Force Chrétienne pour en savoir plus.', 'shop');
+    end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_shop_status on public.shops;
+create trigger trg_shop_status after insert or update on public.shops
+for each row execute function public.on_shop_status();
+
+-- Le badge suit le statut du propriétaire (validation, suspension, passage au réseau)
+create or replace function public.on_profile_verified() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.status is distinct from old.status or new.account_type is distinct from old.account_type then
+    update public.shops set verified = (new.status = 'active' and new.account_type = 'member') where owner = new.id;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_profile_verified on public.profiles;
+create trigger trg_profile_verified after update on public.profiles
+for each row execute function public.on_profile_verified();
+
+drop policy if exists "boutiques publiques" on public.shops;
+create policy "boutiques publiques" on public.shops for select using (status = 'active' or owner = auth.uid() or public.is_admin());
+drop policy if exists "ouvrir sa boutique" on public.shops;
+create policy "ouvrir sa boutique" on public.shops for insert with check (owner = auth.uid() and public.can_sell());
+drop policy if exists "gerer sa boutique" on public.shops;
+create policy "gerer sa boutique" on public.shops for update using (owner = auth.uid() or public.is_admin()) with check (owner = auth.uid() or public.is_admin());
+
+-- Produits : visibles seulement si la boutique est validée ; publication instantanée ensuite
+drop policy if exists "produits publics" on public.products;
+create policy "produits publics" on public.products for select
+  using ((status = 'online' and exists (select 1 from public.shops s where s.id = shop_id and s.status = 'active')) or owner = auth.uid() or public.is_admin());
+drop policy if exists "ajouter un produit" on public.products;
+create policy "ajouter un produit" on public.products for insert
+  with check (owner = auth.uid() and public.can_sell() and exists (select 1 from public.shops s where s.id = shop_id and s.owner = auth.uid()));
+
+-- Signalements (ouverts à tous, même sans compte)
+create table if not exists public.reports (
+  id uuid primary key default gen_random_uuid(),
+  reporter uuid references public.profiles(id) on delete set null,
+  product_id uuid references public.products(id) on delete cascade,
+  shop_id uuid references public.shops(id) on delete cascade,
+  reason text not null check (char_length(reason) between 3 and 500),
+  status text not null default 'open' check (status in ('open','done')),
+  created_at timestamptz not null default now()
+);
+alter table public.reports enable row level security;
+drop policy if exists "signaler" on public.reports;
+create policy "signaler" on public.reports for insert with check (reporter is null or reporter = auth.uid());
+drop policy if exists "lire les signalements" on public.reports;
+create policy "lire les signalements" on public.reports for select using (public.is_admin());
+drop policy if exists "traiter les signalements" on public.reports;
+create policy "traiter les signalements" on public.reports for update using (public.is_admin()) with check (public.is_admin());
+grant insert on public.reports to anon;
+grant select, insert, update on public.reports to authenticated;
+
+create or replace function public.on_report() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v_name text;
+begin
+  select coalesce((select name from public.products where id = new.product_id), (select name from public.shops where id = new.shop_id), 'Joyau') into v_name;
+  perform public.notify_admins('Signalement sur Joyau : « ' || v_name || ' » — ' || left(new.reason, 120));
+  return new;
+end $$;
+drop trigger if exists trg_report on public.reports;
+create trigger trg_report after insert on public.reports
+for each row execute function public.on_report();
+
+create or replace function public.admin_stats() returns json
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'Réservé aux administrateurs'; end if;
+  return json_build_object(
+    'members', (select count(*) from public.profiles where status = 'active' and account_type = 'member'),
+    'sellers', (select count(*) from public.profiles where account_type = 'seller'),
+    'pending', (select count(*) from public.profiles where status = 'pending'),
+    'jobs_pending', (select count(*) from public.jobs where status = 'pending'),
+    'products', (select count(*) from public.products where status = 'online'),
+    'shops', (select count(*) from public.shops where status = 'active'),
+    'shops_pending', (select count(*) from public.shops where status = 'pending'),
+    'reports', (select count(*) from public.reports where status = 'open')
+  );
+end $$;
+
+
+-- Les notifications Joyau arrivent sur le téléphone avec le titre « Joyau »
+create or replace function public.on_notification_push() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v_title text; v_url text;
+begin
+  v_title := case new.kind
+    when 'admin' then 'Force Chrétienne'
+    when 'person' then 'Mon réseau'
+    when 'comment' then 'Nouveau commentaire'
+    when 'like' then 'J''aime'
+    when 'job' then 'Opportunités'
+    when 'joyau' then 'Joyau'
+    else 'Force Chrétienne' end;
+  v_url := '/?open=' || coalesce(nullif(new.link, ''), 'notifs');
+  perform public.enqueue_push(new.user_id, v_title, new.text, v_url, new.id::text);
+  return new;
+end $$;
+
+grant execute on function public.can_sell() to anon, authenticated;
+update public.shops set verified = verified;  -- calcule le badge des boutiques existantes
+
+
 -- Fin. Vérification : la requête suivante doit afficher les deux e-mails administrateurs.
 select email as administrateurs from public.admin_emails;

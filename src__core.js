@@ -31,7 +31,11 @@ function back() { UI.stack.pop(); rerender(); }
 function openSheet(type, data) { UI.sheet = Object.assign({ type }, data || {}); rerender(); }
 function closeSheet() { UI.sheet = null; rerender(); }
 function toast(msg) { UI.toast = msg; clearTimeout(UI.toastT); UI.toastT = setTimeout(() => { UI.toast = ""; rerender(); }, 3000); rerender(); }
-function isMember() { return !!(S.me && S.me.status === "active"); }
+function isMember() { return !!(S.me && S.me.status === "active" && S.me.account_type !== "seller"); }
+function isSeller() { return !!(S.me && S.me.account_type === "seller"); }
+function canSell() { return !!(S.me && (S.me.status === "active" || S.me.status === "pending")); }
+/* Un vendeur Joyau demande à rejoindre le réseau Force Chrétienne */
+function startUpgrade() { if (JOYAU_MODE) { goFC("upgrade"); return; } S.guest = false; UI.sheet = null; UI.stack = []; UI.start = "upgrade"; rerender(); }
 function isAdmin() { return !!(S.me && S.me.role === "admin"); }
 function uid() { return S.session ? S.session.user.id : null; }
 
@@ -182,7 +186,7 @@ const ICONS = {
   chat: '<path d="M4 5h16v11H9l-5 4z"/>',
   brief: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5h6v2"/><path d="M3 13h18"/>',
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/>',
-  back: '<path d="M15 5l-7 7 7 7"/>', close: '<path d="M6 6l12 12M18 6L6 18"/>', plus: '<path d="M12 5v14M5 12h14"/>',
+  back: '<path d="M15 5l-7 7 7 7"/>', close: '<path d="M6 6l12 12M18 6L6 18"/>', flag: '<path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/>', plus: '<path d="M12 5v14M5 12h14"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
   heart: '<path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"/>',
   like: '<path d="M7 11v9H4v-9z"/><path d="M7 11l4-7a2 2 0 0 1 3 2l-1 5h6a2 2 0 0 1 2 2.3l-1.2 5A2 2 0 0 1 17.8 20H7"/>',
@@ -284,7 +288,7 @@ function JoinPrompt({ what }) {
       <${Shield} s=${58} />
       <h2 style="font-size:21px">Réservé aux membres</h2>
       <p class="muted" style="line-height:1.55"><b style="color:var(--ink)">${what || "Cette fonctionnalité"}</b> : accès réservé aux membres validés de Force Chrétienne. Vous pouvez continuer à acheter sur Joyau sans compte.</p>
-      <button class="btn btn-gold btn-block" onClick=${() => { if (JOYAU_MODE) { goFC(S.session ? "" : "signup"); return; } S.guest = false; UI.sheet = null; UI.stack = []; UI.start = S.session ? "" : "signup"; rerender(); }}>${S.session ? "Voir mon adhésion" : "Rejoindre Force Chrétienne"}</button>
+      <button class="btn btn-gold btn-block" onClick=${() => { if (isSeller()) { startUpgrade(); return; } if (JOYAU_MODE) { goFC(S.session ? "" : "signup"); return; } S.guest = false; UI.sheet = null; UI.stack = []; UI.start = S.session ? "" : "signup"; rerender(); }}>${S.session && !isSeller() ? "Voir mon adhésion" : "Rejoindre Force Chrétienne"}</button>
       ${!S.session && html`<button class="btn btn-line btn-block" onClick=${() => { if (JOYAU_MODE) { goFC("login"); return; } S.guest = false; UI.sheet = null; UI.stack = []; UI.start = "login"; rerender(); }}>J'ai déjà un compte</button>`}
       <button class="btn btn-ghost btn-block" onClick=${closeSheet}>Continuer sur Joyau</button>
     </div>

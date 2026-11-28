@@ -143,9 +143,10 @@ function Admin() {
   return html`<div class="overlay"><${OvHead} title="Espace administrateur" />
     <div class="ov-body col" style="gap:14px">
       <div class="row" style="gap:8px"><div class="stat"><b>${st.members || 0}</b><span>membres</span></div><div class="stat"><b>${st.pending || 0}</b><span>adhésions</span></div><div class="stat"><b>${st.jobs_pending || 0}</b><span>offres à valider</span></div></div>
-      <div class="row" style="gap:8px"><div class="stat"><b>${st.shops || 0}</b><span>boutiques</span></div><div class="stat"><b>${st.products || 0}</b><span>annonces Joyau</span></div></div>
-      <div class="seg"><button class=${t === "members" ? "on" : ""} onClick=${() => setT("members")}>Adhésions</button><button class=${t === "jobs" ? "on" : ""} onClick=${() => setT("jobs")}>Emplois</button><button class=${t === "joyau" ? "on" : ""} onClick=${() => setT("joyau")}>Joyau</button><button class=${t === "all" ? "on" : ""} onClick=${() => setT("all")}>Membres</button></div>
-      ${t === "members" ? html`<${AdminMembers} />` : t === "jobs" ? html`<${AdminJobs} />` : t === "joyau" ? html`<${AdminJoyau} />` : html`<${AdminAll} />`}
+      <div class="row" style="gap:8px"><div class="stat"><b>${st.shops || 0}</b><span>boutiques</span></div><div class="stat"><b>${st.shops_pending || 0}</b><span>boutiques à valider</span></div><div class="stat"><b>${st.products || 0}</b><span>annonces Joyau</span></div></div>
+      <div class="row" style="gap:8px"><div class="stat"><b>${st.sellers || 0}</b><span>vendeurs Joyau</span></div><div class="stat"><b>${st.reports || 0}</b><span>signalements</span></div></div>
+      <div class="seg seg-wrap">${[["members", "Adhésions"], ["jobs", "Emplois"], ["shops", "Boutiques" + (st.shops_pending || st.reports ? " •" : "")], ["joyau", "Annonces"], ["all", "Comptes"]].map(([k, l]) => html`<button key=${k} class=${t === k ? "on" : ""} onClick=${() => setT(k)}>${l}</button>`)}</div>
+      ${t === "members" ? html`<${AdminMembers} />` : t === "jobs" ? html`<${AdminJobs} />` : t === "shops" ? html`<${AdminShops} />` : t === "joyau" ? html`<${AdminJoyau} />` : html`<${AdminAll} />`}
     </div></div>`;
 }
 function Candidate({ k }) {
@@ -188,15 +189,43 @@ function AdminJoyau() {
       <button class=${"btn btn-sm " + (x.status === "hidden_admin" ? "btn-ghost" : "btn-line")} onClick=${() => toggle(x)}>${x.status === "hidden_admin" ? "Rétablir" : "Masquer"}</button></div>`)}
     ${!p.loading && !(p.data || []).length && html`<${Empty} icon="store" title="Aucune annonce pour l'instant" />`}</div>`;
 }
+function AdminShops() {
+  const sh = useData("admin-shops", () => q(sb.from("shops").select("*, profiles(nom,prenoms,mail,tel,account_type,status)").order("created_at", { ascending: false }).limit(500)));
+  const rp = useData("admin-reports", () => q(sb.from("reports").select("*, products(name), shops(name)").eq("status", "open").order("created_at", { ascending: false }).limit(200)));
+  const [busy, setBusy] = useState("");
+  const setStatus = async (x, st) => { setBusy(x.id + st); try { await q(sb.from("shops").update({ status: st }).eq("id", x.id)); toast(st === "active" ? "Boutique « " + x.name + " » validée. Le vendeur est prévenu." : "Boutique suspendue. Le vendeur est prévenu."); refresh(); } catch (e) { fail(e); } setBusy(""); };
+  const done = async r => { try { await q(sb.from("reports").update({ status: "done" }).eq("id", r.id)); toast("Signalement traité."); refresh(); } catch (e) { fail(e); } };
+  const all = sh.data || [], pend = all.filter(x => x.status === "pending"), others = all.filter(x => x.status !== "pending"), reps = rp.data || [];
+  const who = x => { const p = x.profiles || {}; return html`<span class="tiny muted" style="line-height:1.5">${p.nom ? fullName(p) + " · " : ""}${p.account_type === "seller" ? "Vendeur Joyau" : "Membre Force Chrétienne"}${x.verified ? " (vérifié)" : ""}<br />WhatsApp ${x.whatsapp}${p.mail ? " · " + p.mail : ""}</span>`; };
+  const head = x => html`<span class="row"><span class="logo-sq" style="width:44px;height:44px;background:#1D4ED8">${initials(x.name)}</span><span class="grow" style="min-width:0"><b>${x.name}</b><br /><span class="small muted">${x.city || ""} · ${ago(x.created_at)}</span></span></span>`;
+  return html`<div class="col" style="gap:10px">
+    <div class="section-title" style="margin:4px 0 0"><h2 style="font-size:17px">À valider (${pend.length})</h2></div>
+    <p class="small muted" style="margin-top:-4px">Une boutique validée publie ensuite ses produits instantanément.</p>
+    ${pend.map(x => html`<div key=${x.id} class="card col" style="gap:8px">${head(x)}${who(x)}${x.description && html`<span class="small" style="line-height:1.5">${x.description}</span>`}
+      <span class="row" style="gap:8px"><${Busy} on=${busy === x.id + "active"} cls="btn btn-gold btn-sm grow" onClick=${() => setStatus(x, "active")}><${Icon} n="check" s=${17} w=${2.6} />Valider<//><${Busy} on=${busy === x.id + "suspended"} cls="btn btn-danger btn-sm grow" onClick=${() => setStatus(x, "suspended")}>Refuser<//></span></div>`)}
+    ${!sh.loading && !pend.length && html`<span class="small muted">Aucune boutique en attente.</span>`}
+    <div class="section-title" style="margin:14px 0 0"><h2 style="font-size:17px">Signalements (${reps.length})</h2></div>
+    ${reps.map(r => html`<div key=${r.id} class="card col" style="gap:8px;border-color:#F3C4C4">
+      <span class="small"><b>${r.products ? "Annonce « " + r.products.name + " »" : r.shops ? "Boutique « " + r.shops.name + " »" : "Joyau"}</b> · <span class="muted">${ago(r.created_at)}</span></span>
+      <span class="small" style="line-height:1.5">${r.reason}</span>
+      <span class="row" style="gap:8px">${(r.product_id || r.shop_id) && html`<button class="btn btn-line btn-sm grow" onClick=${() => r.product_id ? push("product", { id: r.product_id }) : push("seller", { id: r.shop_id })}>Voir</button>`}<button class="btn btn-ghost btn-sm grow" onClick=${() => done(r)}>Marquer traité</button></span></div>`)}
+    ${!rp.loading && !reps.length && html`<span class="small muted">Aucun signalement ouvert.</span>`}
+    <div class="section-title" style="margin:14px 0 0"><h2 style="font-size:17px">Toutes les boutiques (${others.length})</h2></div>
+    ${others.map(x => html`<div key=${x.id} class="list-row"><span class="grow col" style="min-width:0;gap:2px"><b class="small">${x.name} <span class=${"pill " + (x.status === "active" ? "pill-ok" : "pill-grey")}>${x.status === "active" ? "En ligne" : "Suspendue"}</span></b>${who(x)}</span>
+      ${x.status === "active" ? html`<button class="btn btn-line btn-sm" onClick=${() => openSheet("confirm", { title: "Suspendre « " + x.name + " » ?", text: "La boutique et tous ses produits disparaissent de Joyau jusqu'à sa réactivation. Le vendeur est prévenu.", ok: "Suspendre", fn: () => setStatus(x, "suspended") })}>Suspendre</button>` : html`<button class="btn btn-ghost btn-sm" onClick=${() => setStatus(x, "active")}>Réactiver</button>`}</div>`)}
+  </div>`;
+}
 function AdminAll() {
   const [qq, setQ] = useState("");
   const m = useData("admin-all", () => q(sb.from("profiles").select("*").neq("status", "pending").order("created_at", { ascending: false }).limit(1000)));
-  const list = (m.data || []).filter(x => !qq || [fullName(x), x.mail, x.eglise].join(" ").toLowerCase().includes(qq.toLowerCase()));
+  const [kind, setKind] = useState("all");
+  const list = (m.data || []).filter(x => (kind === "all" || (x.account_type || "member") === kind) && (!qq || [fullName(x), x.mail, x.eglise, x.tel].join(" ").toLowerCase().includes(qq.toLowerCase())));
   const setStatus = async (x, st) => { try { await q(sb.from("profiles").update({ status: st }).eq("id", x.id)); refresh(); toast(st === "active" ? "Membre réactivé." : "Membre suspendu."); } catch (e) { fail(e); } };
   return html`<div class="col">
     <div class="search"><${Icon} n="search" s=${19} c="#63666F" /><input id="adm-q" class="input" value=${qq} onInput=${e => setQ(e.target.value)} placeholder="Nom, e-mail, église…" /></div>
-    ${list.map(x => html`<div key=${x.id} class="list-row"><${Avatar} p=${x} size=${42} /><span class="grow" style="min-width:0"><b class="small">${fullName(x)}</b>${x.role === "admin" && html` <span class="pill pill-gold">Admin</span>`}<br /><span class="tiny muted">${x.mail} · ${x.status === "active" ? "membre" : "refusé / suspendu"}</span></span>
-      ${x.role !== "admin" && (x.status === "active" ? html`<button class="btn btn-line btn-sm" onClick=${() => openSheet("confirm", { title: "Suspendre " + fullName(x) + " ?", text: "Il n'aura plus accès au réseau tant que vous ne l'aurez pas réactivé.", ok: "Suspendre", fn: () => setStatus(x, "refused") })}>Suspendre</button>` : html`<button class="btn btn-ghost btn-sm" onClick=${() => setStatus(x, "active")}>Réactiver</button>`)}</div>`)}
+    <div class="chips" style="margin:2px 0 6px">${[["all", "Tous"], ["member", "Membres Force Chrétienne"], ["seller", "Vendeurs Joyau"]].map(([k, l]) => html`<button key=${k} class=${"chip" + (kind === k ? " on" : "")} onClick=${() => setKind(k)}>${l}</button>`)}</div>
+    ${list.map(x => html`<div key=${x.id} class="list-row"><${Avatar} p=${x} size=${42} /><span class="grow" style="min-width:0"><b class="small">${fullName(x)}</b>${x.role === "admin" && html` <span class="pill pill-gold">Admin</span>`}<br /><span class="tiny muted">${x.mail} · ${x.account_type === "seller" ? "vendeur Joyau" : "membre"}${x.status === "active" ? "" : " · refusé / suspendu"}</span></span>
+      ${x.role !== "admin" && (x.status === "active" ? html`<button class="btn btn-line btn-sm" onClick=${() => openSheet("confirm", { title: "Suspendre " + fullName(x) + " ?", text: x.account_type === "seller" ? "Il ne pourra plus ouvrir de boutique ni ajouter de produits tant que vous ne l'aurez pas réactivé." : "Il n'aura plus accès au réseau tant que vous ne l'aurez pas réactivé.", ok: "Suspendre", fn: () => setStatus(x, "refused") })}>Suspendre</button>` : html`<button class="btn btn-ghost btn-sm" onClick=${() => setStatus(x, "active")}>Réactiver</button>`)}</div>`)}
   </div>`;
 }
 
@@ -232,6 +261,7 @@ function OverlayView({ o }) {
     case "shop": return html`<${Shop} />`;
     case "shopEdit": return html`<${ShopForm} edit />`;
     case "productForm": return html`<${ProductForm} shop=${o.shop} edit=${o.edit} />`;
+    case "sellerAuth": return html`<${SellerAuth} mode=${o.mode} />`;
     case "editProfile": return html`<${EditProfile} />`;
     case "password": return html`<${ChangePassword} />`;
     case "install": return html`<${Install} />`;
@@ -248,6 +278,7 @@ function SheetView({ s }) {
     case "newMsg": return html`<${NewMsgSheet} />`;
     case "confirm": return html`<${ConfirmSheet} ...${s} />`;
     case "installJoyau": return html`<${InstallJoyauSheet} />`;
+    case "report": return html`<${ReportSheet} product_id=${s.product_id} shop_id=${s.shop_id} name=${s.name} />`;
     case "copy": return html`<${Sheet}><div class="col" style="gap:12px"><h2 style="font-size:19px">Copiez ce lien</h2><input id="copy-url" class="input" readonly value=${s.url} onFocus=${e => e.target.select()} /><button class="btn btn-ink btn-block" onClick=${closeSheet}>Fermer</button></div><//>`;
   }
   return null;
@@ -267,7 +298,8 @@ function App() {
   else if (S.recovery && S.session) screen = html`<${NewPassword} />`;
   else if (UI.start === "login" && !S.session) screen = html`<${Login} />`;
   else if (UI.start === "signup" && !S.session) screen = html`<${Signup} />`;
-  else if (isMember() || S.guest) {
+  else if (UI.start === "upgrade" && isSeller()) screen = html`<${ProfileSetup} upgrade />`;
+  else if (isMember() || S.guest || isSeller()) {
     if (!isMember() && UI.tab !== "joyau") UI.tab = "joyau";
     const tab = UI.tab;
     screen = html`<div>

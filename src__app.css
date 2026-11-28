@@ -89,6 +89,8 @@ img { max-width: 100%; }
 .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--soft); border-radius: 14px; padding: 4px; gap: 4px; }
 .seg button { height: 40px; border: 0; border-radius: 11px; background: none; font-weight: 700; font-size: 14px; color: var(--muted); }
 .seg button.on { background: #fff; color: var(--ink); box-shadow: 0 2px 8px rgba(35,38,45,0.08); }
+.seg-wrap { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.seg-wrap button { font-size: 13.5px; }
 .section-title { display: flex; justify-content: space-between; align-items: baseline; margin: 26px 0 12px; }
 .section-title h2 { font-size: 20px; }
 
